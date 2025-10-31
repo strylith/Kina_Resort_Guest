@@ -175,13 +175,14 @@
       
       <div class="ai-chat-input-container">
         <div class="ai-chat-input-wrapper">
-          <input 
-            type="text" 
+          <textarea 
             id="ai-chat-input" 
             class="ai-chat-input" 
             placeholder="Type a message..."
-            onkeypress="handleAIChatKeypress(event)"
-          >
+            rows="1"
+            maxlength="500"
+            onkeydown="handleAIChatKeypress(event)"
+          ></textarea>
           <button class="ai-chat-send" onclick="sendAIMessage()" title="Send message">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="22" y1="2" x2="11" y2="13"></line>

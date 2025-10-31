@@ -9,6 +9,10 @@ import { AI_CONFIG, isAPIConfigured, getMockResponse } from '../config/aiConfig.
 let isAIChatOpen = false;
 let chatHistory = []; // For display purposes
 let apiHistory = []; // Separate history for API context to avoid format conflicts
+let isGeneratingResponse = false; // Track if AI is currently generating a response
+
+// Character limits
+const MAX_USER_MESSAGE_LENGTH = 500; // Maximum characters for user messages
 
 // =============================================================================
 // AI CHAT UI FUNCTIONS
@@ -20,6 +24,7 @@ function openAIChat() {
   const chatPopup = document.getElementById('ai-chat-popup');
   const aiButton = document.getElementById('resort-ai');
   const notification = document.getElementById('ai-notification');
+  const messagesContainer = document.getElementById('ai-chat-messages');
   
   if (chatPopup) {
     console.log('Chat popup found, showing...');
@@ -39,8 +44,90 @@ function openAIChat() {
     if (notification) {
       notification.style.display = 'none';
     }
+    
+    // Check if this is a new conversation (no previous messages)
+    const hasUserMessages = messagesContainer ? 
+      Array.from(messagesContainer.children).some(child => 
+        child.classList.contains('user-message-group')
+      ) : false;
+    
+    // Reset API history for new conversations to minimize tokens
+    // Only reset if there are no previous messages in the chat
+    if (!hasUserMessages && apiHistory.length > 0) {
+      console.log('New conversation detected - resetting API history');
+      apiHistory = [];
+      chatHistory = [];
+    }
+    
+    // Show suggested questions if user hasn't sent any messages yet
+    setTimeout(() => {
+      if (messagesContainer && !hasUserMessages) {
+        showSuggestedQuestions();
+      }
+    }, 300);
   } else {
     console.error('Chat popup element not found!');
+  }
+}
+
+
+// Show suggested questions in chat conversation
+function showSuggestedQuestions() {
+  const messagesContainer = document.getElementById('ai-chat-messages');
+  if (!messagesContainer) return;
+  
+  // Remove existing suggested questions if any
+  hideSuggestedQuestions();
+  
+  // Create suggested questions container
+  const suggestedContainer = document.createElement('div');
+  suggestedContainer.id = 'ai-suggested-questions';
+  suggestedContainer.className = 'ai-suggested-questions';
+  
+  // Predefined 3 suggested questions - Formal and professional
+  const questions = [
+    'What are your room rates and packages?',
+    'What is the best time to visit?',
+    'What accommodations are currently available?'
+  ];
+  
+  suggestedContainer.innerHTML = `
+    <div class="suggested-questions-list">
+      ${questions.map(q => `
+        <button class="suggested-question-button" data-question="${q.replace(/"/g, '&quot;')}">
+          ${q}
+        </button>
+      `).join('')}
+    </div>
+  `;
+  
+  // Add click event listeners
+  const questionButtons = suggestedContainer.querySelectorAll('.suggested-question-button');
+  questionButtons.forEach(button => {
+    button.addEventListener('click', function() {
+      const question = this.getAttribute('data-question');
+      const input = document.getElementById('ai-chat-input');
+      if (input) {
+        input.value = question;
+        // Auto-resize if it's a textarea
+        autoResizeTextarea();
+        sendAIMessage();
+      }
+    });
+  });
+  
+  // Append to messages container
+  messagesContainer.appendChild(suggestedContainer);
+  
+  // Scroll to bottom to show suggestions
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Hide suggested questions (remove from DOM)
+function hideSuggestedQuestions() {
+  const suggestedContainer = document.getElementById('ai-suggested-questions');
+  if (suggestedContainer) {
+    suggestedContainer.remove();
   }
 }
 
@@ -67,16 +154,91 @@ function closeAIChat() {
   }
 }
 
-// Handle Enter key press in chat input
+// Handle Enter key press in chat input - Shift+Enter for new line, Enter to send
 function handleAIChatKeypress(event) {
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
     sendAIMessage();
+  }
+  // Allow Shift+Enter for new line - textarea will handle it automatically
+}
+
+// Auto-resize textarea based on content
+function autoResizeTextarea() {
+  const input = document.getElementById('ai-chat-input');
+  if (input && input.tagName === 'TEXTAREA') {
+    // Reset height to auto to get the correct scrollHeight
+    input.style.height = 'auto';
+    // Set height based on scrollHeight, with max height constraint
+    const maxHeight = 120; // Maximum height in pixels (about 5 lines)
+    const newHeight = Math.min(input.scrollHeight, maxHeight);
+    input.style.height = newHeight + 'px';
+    input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+}
+
+// Update character counter and enforce limit
+function updateCharacterCounter() {
+  const input = document.getElementById('ai-chat-input');
+  const counter = document.getElementById('ai-char-counter');
+  
+  if (!input || !counter) return;
+  
+  const currentLength = input.value.length;
+  const remaining = MAX_USER_MESSAGE_LENGTH - currentLength;
+  
+  // Update counter text
+  counter.textContent = `${currentLength}/${MAX_USER_MESSAGE_LENGTH}`;
+  
+  // Update counter color based on remaining characters
+  if (remaining < 50) {
+    counter.classList.add('warning');
+    counter.classList.remove('error');
+  } else if (remaining < 0) {
+    counter.classList.add('error');
+    counter.classList.remove('warning');
+  } else {
+    counter.classList.remove('warning', 'error');
+  }
+  
+  // Enforce character limit
+  if (currentLength > MAX_USER_MESSAGE_LENGTH) {
+    input.value = input.value.substring(0, MAX_USER_MESSAGE_LENGTH);
+    autoResizeTextarea();
+    updateCharacterCounter(); // Update counter after truncation
+  }
+}
+
+// Enable/disable chat input and send button
+function setChatInputEnabled(enabled) {
+  const input = document.getElementById('ai-chat-input');
+  const sendButton = document.querySelector('.ai-chat-send');
+  
+  if (input) {
+    input.disabled = !enabled;
+    if (input.tagName === 'TEXTAREA') {
+      input.style.opacity = enabled ? '1' : '0.6';
+      input.style.cursor = enabled ? 'text' : 'not-allowed';
+    }
+  }
+  
+  if (sendButton) {
+    sendButton.disabled = !enabled;
+    sendButton.style.opacity = enabled ? '1' : '0.6';
+    sendButton.style.cursor = enabled ? 'pointer' : 'not-allowed';
   }
 }
 
 // Send message to AI
 async function sendAIMessage() {
   console.log('sendAIMessage called');
+  
+  // Prevent sending multiple messages while AI is generating
+  if (isGeneratingResponse) {
+    console.log('AI is already generating a response, ignoring new message');
+    return;
+  }
+  
   const input = document.getElementById('ai-chat-input');
   const messagesContainer = document.getElementById('ai-chat-messages');
   
@@ -91,10 +253,30 @@ async function sendAIMessage() {
     return;
   }
   
+  // Check character limit
+  if (message.length > MAX_USER_MESSAGE_LENGTH) {
+    // This shouldn't happen if limit is enforced, but add safety check
+    addMessageToChat(`Message is too long. Please keep it under ${MAX_USER_MESSAGE_LENGTH} characters.`, 'ai');
+    isGeneratingResponse = false;
+    setChatInputEnabled(true);
+    input.focus();
+    return;
+  }
+  
   console.log('Sending message:', message);
   
-  // Clear input
+  // Set generating state and disable input
+  isGeneratingResponse = true;
+  setChatInputEnabled(false);
+  
+  // Hide suggested questions when user sends message
+  hideSuggestedQuestions();
+  
+  // Clear input and reset height
   input.value = '';
+  if (input.tagName === 'TEXTAREA') {
+    autoResizeTextarea();
+  }
   
   // Add user message to chat
   addMessageToChat(message, 'user');
@@ -122,7 +304,197 @@ async function sendAIMessage() {
     
     // Add error message
     addMessageToChat('Sorry, there was an error. Please try again.', 'ai');
+  } finally {
+    // Re-enable input and send button when done (success or error)
+    isGeneratingResponse = false;
+    setChatInputEnabled(true);
+    
+    // Focus input for next message
+    const input = document.getElementById('ai-chat-input');
+    if (input && !input.disabled) {
+      input.focus();
+    }
   }
+}
+
+// Format message text for better readability (convert markdown-like syntax to HTML)
+function formatMessageText(text) {
+  if (!text) return '';
+  
+  // Split into lines for processing
+  const lines = text.split('\n');
+  const output = [];
+  let inList = false;
+  let listType = null; // 'ul' or 'ol'
+  let listItems = [];
+  let inCodeBlock = false;
+  let codeBlockContent = [];
+  
+  function closeList() {
+    if (listItems.length > 0) {
+      // Always use ul (bullet list) instead of ol
+      output.push(`<ul>${listItems.join('')}</ul>`);
+      listItems = [];
+      inList = false;
+      listType = null;
+    }
+  }
+  
+  function closeCodeBlock() {
+    if (codeBlockContent.length > 0) {
+      output.push(`<pre><code>${codeBlockContent.join('\n')}</code></pre>`);
+      codeBlockContent = [];
+      inCodeBlock = false;
+    }
+  }
+  
+  function formatInline(text) {
+    if (!text || typeof text !== 'string') return '';
+    
+    // First escape HTML to prevent XSS
+    let formatted = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    // Process formatting in specific order to avoid conflicts
+    
+    // 1. Code inline (`code`) - process first and protect from other formatting
+    const codeBlocks = [];
+    formatted = formatted.replace(/`([^`]+)`/g, function(match, content) {
+      const id = `__CODE_${codeBlocks.length}__`;
+      codeBlocks.push(`<code>${content}</code>`);
+      return id;
+    });
+    
+    // 2. Combined bold italic (***text*** or ___text___) - process before single formats
+    formatted = formatted.replace(/\*\*\*([^*]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    formatted = formatted.replace(/___([^_]+?)___/g, '<strong><em>$1</em></strong>');
+    
+    // 3. Bold (**text** or __text__)
+    formatted = formatted.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    formatted = formatted.replace(/__([^_]+?)__/g, '<strong>$1</strong>');
+    
+    // 4. Strikethrough (~~text~~)
+    formatted = formatted.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+    
+    // 5. Underline (++text++)
+    formatted = formatted.replace(/\+\+([^+]+?)\+\+/g, '<u>$1</u>');
+    
+    // 6. Italic (*text* or _text_) - process after bold to avoid conflicts
+    // Use a more reliable approach that checks if already formatted
+    formatted = formatted.replace(/\*([^*\n<]+?)\*/g, function(match, content) {
+      // Skip if already inside a tag or is part of bold formatting
+      if (match.includes('**') || match.includes('<strong>') || match.includes('<em>') || 
+          match.includes('<code>') || match.includes('<del>') || match.includes('<u>')) {
+        return match;
+      }
+      return '<em>' + content + '</em>';
+    });
+    formatted = formatted.replace(/_([^_\n<]+?)_/g, function(match, content) {
+      // Skip if already inside a tag or is part of bold formatting
+      if (match.includes('__') || match.includes('<strong>') || match.includes('<em>') ||
+          match.includes('<code>') || match.includes('<del>') || match.includes('<u>')) {
+        return match;
+      }
+      return '<em>' + content + '</em>';
+    });
+    
+    // Restore code blocks
+    codeBlocks.forEach((code, index) => {
+      formatted = formatted.replace(`__CODE_${index}__`, code);
+    });
+    
+    return formatted;
+  }
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Check for code blocks (```code```)
+    if (line.trim().startsWith('```')) {
+      if (inCodeBlock) {
+        closeCodeBlock();
+      } else {
+        closeList();
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    
+    // If inside code block, just collect content
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      continue;
+    }
+    
+    // Process regular lines
+    let trimmedLine = line.trim();
+    
+    // Skip empty lines that separate paragraphs
+    if (trimmedLine === '') {
+      closeList();
+      closeCodeBlock();
+      continue;
+    }
+    
+    // Check for numbered list (1. item, 2. item) - convert to bullet list
+    const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+    if (numberedMatch) {
+      if (!inList || listType !== 'ul') {
+        closeList();
+        inList = true;
+        listType = 'ul'; // Use ul (bullet list) instead of ol
+      }
+      const listContent = formatInline(numberedMatch[2]);
+      listItems.push(`<li>${listContent}</li>`);
+      continue;
+    }
+    
+    // Check for bullet list (- item, * item, or • item)
+    const bulletMatch = trimmedLine.match(/^[-•*]\s+(.+)$/);
+    if (bulletMatch) {
+      if (!inList || listType !== 'ul') {
+        closeList();
+        inList = true;
+        listType = 'ul';
+      }
+      const listContent = formatInline(bulletMatch[1]);
+      listItems.push(`<li>${listContent}</li>`);
+      continue;
+    }
+    
+    // Not a list item - close any open list and add as paragraph
+    closeList();
+    
+    // Format inline markdown
+    const formattedLine = formatInline(trimmedLine);
+    output.push(`<p>${formattedLine}</p>`);
+  }
+  
+  // Close any remaining list or code block
+  closeList();
+  closeCodeBlock();
+  
+  // If no output, return empty paragraph
+  if (output.length === 0) {
+    return '<p></p>';
+  }
+  
+  let result = output.join('');
+  
+  // Ensure proper spacing around lists
+  result = result.replace(/(<\/p>)(<[uo]l>)/g, '$1$2');
+  result = result.replace(/(<\/[uo]l>)(<p>)/g, '$1$2');
+  
+  // Clean up any remaining unmatched markdown syntax only if it's clearly orphaned
+  // Only remove if it's at the end of a paragraph and not part of content
+  result = result.replace(/([^<])\*\*\s*$/gm, '$1'); // Unmatched bold at end
+  result = result.replace(/([^<])__\s*$/gm, '$1'); // Unmatched bold alt at end
+  result = result.replace(/([^<*])\*\s*$/gm, '$1'); // Unmatched italic at end (but not **)
+  result = result.replace(/([^<_])_\s*$/gm, '$1'); // Unmatched italic alt at end (but not __)
+  
+  return result;
 }
 
 // Add message to chat interface
@@ -136,13 +508,21 @@ function addMessageToChat(message, sender) {
   const avatar = sender === 'user' ? '👤' : '🤖';
   const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   
-  messageGroup.innerHTML = `
+  // Only show avatar for AI messages, not for user messages
+  const avatarHTML = sender === 'user' ? '' : `
     <div class="message-avatar">
       <div class="avatar-img">${avatar}</div>
     </div>
+  `;
+  
+  // Format message text for AI messages (convert markdown to HTML)
+  const formattedMessage = sender === 'ai' ? formatMessageText(message) : message.replace(/\n/g, '<br>');
+  
+  messageGroup.innerHTML = `
+    ${avatarHTML}
     <div class="message-bubble ${sender === 'user' ? 'user-message-bubble' : 'ai-message-bubble'}">
       <div class="message-text">
-        <p>${message}</p>
+        ${formattedMessage}
       </div>
       <div class="message-time">${currentTime}</div>
     </div>
@@ -210,28 +590,45 @@ async function getAIResponse(userMessage) {
     return getMockResponse(userMessage);
   }
   
-  // Add user message to API history
-  apiHistory.push({ role: 'user', content: userMessage });
-  
-  // Limit history to prevent token overflow
-  if (apiHistory.length > AI_CONFIG.MAX_HISTORY * 2) {
-    apiHistory = apiHistory.slice(-(AI_CONFIG.MAX_HISTORY * 2));
+  // Limit history BEFORE adding new message to maintain consistent token usage
+  const maxHistoryLength = AI_CONFIG.MAX_HISTORY * 2; // MAX_HISTORY pairs (user + assistant)
+  if (apiHistory.length >= maxHistoryLength) {
+    // Trim history to keep only recent messages, leaving room for new message
+    const keepMessages = maxHistoryLength - 2; // Leave room for new user + assistant message
+    if (keepMessages > 0) {
+      apiHistory = apiHistory.slice(-keepMessages);
+    } else {
+      apiHistory = []; // Reset if history limit is too small
+    }
   }
   
+  // Add user message to API history AFTER trimming
+  apiHistory.push({ role: 'user', content: userMessage });
+  
   try {
-    console.log('Sending request to DeepSeek API...');
+    console.log('Sending request to OpenRouter API...');
     
-    // Construct full messages array with system prompt and history
+    // Construct messages array - always include system prompt for context
+    // For first message, only system prompt + user message (minimal tokens)
     const messages = [
       { role: 'system', content: AI_CONFIG.SYSTEM_PROMPT },
       ...apiHistory
     ];
     
+    // Log token estimate for debugging
+    if (localStorage.getItem('DEBUG_AI') === 'true') {
+      const estimatedTokens = JSON.stringify(messages).length / 4; // Rough estimate: 1 token ≈ 4 chars
+      console.log('Estimated input tokens:', Math.ceil(estimatedTokens));
+      console.log('Messages being sent:', messages);
+    }
+    
     const response = await fetch(AI_CONFIG.API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${AI_CONFIG.API_KEY}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin, // Required by OpenRouter to identify your app
+        'X-Title': 'Kina Resort AI Assistant' // Optional: App name for OpenRouter analytics
       },
       body: JSON.stringify({
         model: AI_CONFIG.MODEL,
@@ -310,6 +707,17 @@ function initializeAIChat() {
     chatPopup.addEventListener('click', function(e) {
       e.stopPropagation();
     });
+    
+    // Allow wheel events in textarea - don't prevent them from bubbling
+    chatPopup.addEventListener('wheel', function(e) {
+      const textarea = document.getElementById('ai-chat-input');
+      // If the wheel event is from the textarea, allow it to scroll normally
+      if (textarea && (e.target === textarea || textarea.contains(e.target))) {
+        // Don't prevent default or stop propagation - let textarea handle scrolling
+        return;
+      }
+      // For other elements inside chat popup, allow default behavior
+    }, { passive: true });
   }
   
   // Close chat when clicking outside of it
@@ -318,6 +726,57 @@ function initializeAIChat() {
       closeAIChat();
     }
   });
+  
+  // Setup auto-resize for textarea input
+  const input = document.getElementById('ai-chat-input');
+  if (input && input.tagName === 'TEXTAREA') {
+    input.addEventListener('input', autoResizeTextarea);
+    // Initial resize
+    setTimeout(autoResizeTextarea, 100);
+    
+    // Ensure wheel events work in textarea - explicitly handle wheel scrolling
+    // Use non-passive listener so we can stop propagation to parent containers
+    input.addEventListener('wheel', function(e) {
+      // Allow the textarea to scroll naturally (default behavior)
+      // Stop propagation to prevent parent containers (like messagesContainer) from handling it
+      e.stopPropagation();
+      // Don't prevent default - let the browser handle scrolling naturally
+    });
+  }
+  
+  // Prevent scroll propagation to page when scrolling inside chat messages
+  const messagesContainer = document.getElementById('ai-chat-messages');
+  if (messagesContainer) {
+    // Always prevent wheel events from propagating when inside the messages container
+    // BUT allow textarea to handle its own scroll events
+    messagesContainer.addEventListener('wheel', function(e) {
+      // Don't stop propagation if the event is from the textarea
+      const textarea = document.getElementById('ai-chat-input');
+      if (textarea && (e.target === textarea || textarea.contains(e.target))) {
+        return; // Let textarea handle its own scrolling
+      }
+      e.stopPropagation();
+    }, { passive: false });
+    
+    // Prevent touch scroll propagation
+    messagesContainer.addEventListener('touchmove', function(e) {
+      e.stopPropagation();
+    }, { passive: false });
+    
+    // Prevent all mouse events within the container from propagating
+    messagesContainer.addEventListener('mousedown', function(e) {
+      e.stopPropagation();
+    });
+    
+    messagesContainer.addEventListener('mouseup', function(e) {
+      e.stopPropagation();
+    });
+    
+    // Prevent scrollbar dragging from propagating
+    messagesContainer.addEventListener('scroll', function(e) {
+      e.stopPropagation();
+    });
+  }
   
   // CSS is now handled in the main stylesheet
 }
@@ -335,7 +794,9 @@ async function testAPIConnection() {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${AI_CONFIG.API_KEY}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin, // Required by OpenRouter to identify your app
+        'X-Title': 'Kina Resort AI Assistant' // Optional: App name for OpenRouter analytics
       },
       body: JSON.stringify({
         model: AI_CONFIG.MODEL,
@@ -381,3 +842,4 @@ window.closeAIChat = closeAIChat;
 window.minimizeAIChat = minimizeAIChat;
 window.handleAIChatKeypress = handleAIChatKeypress;
 window.sendAIMessage = sendAIMessage;
+window.updateCharacterCounter = updateCharacterCounter;
