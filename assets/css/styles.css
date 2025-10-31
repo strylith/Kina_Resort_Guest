@@ -5401,6 +5401,34 @@ input[type="date"][readonly]:hover {
   background: #059669;
 }
 
+/* Unavailable Room/Hall/Cottage Styling */
+.room-selection-card.unavailable {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: #f8f9fa;
+  border-color: #dee2e6;
+}
+
+.room-selection-card.unavailable:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: #dee2e6;
+}
+
+.room-selection-card.unavailable .room-card-image {
+  filter: grayscale(50%);
+}
+
+.room-selection-card.unavailable .room-select-btn {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.room-selection-card.unavailable .room-select-btn:hover {
+  background: #94a3b8;
+}
+
 .agreement-section {
   margin: 32px 0;
   padding: 24px;

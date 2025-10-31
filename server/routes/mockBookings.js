@@ -169,13 +169,17 @@ router.post('/bookings', async (req, res) => {
     }
 
     // Create booking items for function halls
-    if (selectedHall) {
+    // Support both legacy selectedHall and new hallId fields with usage_date
+    const hallId = req.body.hallId || req.body.selectedHall || null;
+    const eventDate = (req.body.checkIn && req.body.checkOut && req.body.checkIn === req.body.checkOut) ? req.body.checkIn : (req.body.eventDate || req.body.dates?.eventDate || null);
+    if (hallId) {
       const itemId = `${bookingId}-hall`;
       mockClient.tables.booking_items.set(itemId, {
         id: itemId,
         booking_id: bookingId,
         item_type: 'function-hall',
-        item_id: selectedHall
+        item_id: hallId,
+        usage_date: eventDate || req.body.checkIn
       });
     }
 
@@ -669,9 +673,9 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       iterationCount++;
       console.log(`[MockAvailability] 🔁 Loop iteration ${iterationCount}: currentDate=${currentYear}-${currentMonth}-${currentDay}`);
       
-      // Build date string
+      // Build date string (YYYY-MM-DD format)
       const dateString = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`;
-      console.log(`[MockAvailability] 🔁 Built dateString="${dateString}", checkOutDateStr="${checkOutDateStr}"`);
+      console.log(`[MockAvailability] 🔁 Built dateString="${dateString}" (format: YYYY-MM-DD), checkOutDateStr="${checkOutDateStr}"`);
       console.log(`[MockAvailability] 🔁 Comparison: "${dateString}" > "${checkOutDateStr}" = ${dateString > checkOutDateStr}`);
       
       // Stop once we reach checkout date (exclusive checkout semantics)
@@ -873,8 +877,11 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
     ).length;
     
     console.log(`[MockAvailability] Category '${requestedCategory}': Overall availability: ${allDatesAvailable}, avg: ${avgAvailability}, booked dates: ${bookedDateCount}/${Object.keys(dateAvailability).length}`);
-    console.log(`[MockAvailability] 📋 Final dateAvailability keys:`, Object.keys(dateAvailability));
-    console.log(`[MockAvailability] 📋 Final dateAvailability object:`, JSON.stringify(dateAvailability, null, 2));
+    console.log(`[MockAvailability] 📋 Final dateAvailability keys (YYYY-MM-DD format):`, Object.keys(dateAvailability));
+    console.log(`[MockAvailability] 📋 Sample key format check:`, Object.keys(dateAvailability).length > 0 ? `First key: "${Object.keys(dateAvailability)[0]}" matches YYYY-MM-DD: ${/^\d{4}-\d{2}-\d{2}$/.test(Object.keys(dateAvailability)[0])}` : 'No keys');
+    if (requestedCategory === 'function-halls') {
+      console.log(`[MockAvailability] 🏛️ Function halls final data:`, JSON.stringify(dateAvailability, null, 2));
+    }
 
     // Compute range-level availability across the entire requested window
     // Rooms: list those free on every date in the range

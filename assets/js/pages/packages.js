@@ -1014,18 +1014,31 @@ export function initLuxuryPackages() {
       window.showAvailableFunctionHalls = async function(checkin, checkout) {
         const container = document.getElementById('function-halls-container');
         if (!container) return;
+        
+        console.log('[showAvailableFunctionHalls] 🏛️ Called with checkin:', checkin, 'checkout:', checkout);
+        
+        // Reset all category states and button before entering function hall selection
+        resetFloatingContinueButton();
+        
         // Loading state
         container.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--color-muted);">Checking availability...</div>';
 
         const visitDate = checkin || null; // single day
         window.functionHallVisitDate = visitDate;
+        console.log('[showAvailableFunctionHalls] 🏛️ Visit date set to:', visitDate);
+        
         let available = [];
+        const halls = bookingState.allFunctionHalls || ['Grand Function Hall','Intimate Function Hall'];
+        console.log('[showAvailableFunctionHalls] 🏛️ All halls:', halls);
+        
         try {
           available = visitDate ? await bookingState.getAvailableFunctionHalls(visitDate) : bookingState.allFunctionHalls;
-        } catch (_) {
+          console.log('[showAvailableFunctionHalls] ✅ Available halls from API:', available);
+        } catch (err) {
+          console.error('[showAvailableFunctionHalls] ❌ Error fetching availability:', err);
           available = bookingState.allFunctionHalls || ['Grand Function Hall','Intimate Function Hall'];
+          console.log('[showAvailableFunctionHalls] ⚠️ Falling back to all halls:', available);
         }
-        const halls = bookingState.allFunctionHalls || ['Grand Function Hall','Intimate Function Hall'];
         container.innerHTML = `
           <div class="fh-wrap" style="width:100%; max-width:1100px; margin:0 auto;">
           <div class="room-selection-header" style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -1045,10 +1058,17 @@ export function initLuxuryPackages() {
             </div>
           </div>
           <div class="room-selection-grid" style="grid-template-columns: repeat(2, 1fr);">
-            ${halls.map(hall => {
+            ${halls.filter(hall => {
               const isAvailable = Array.isArray(available) && available.includes(hall);
+              console.log(`[showAvailableFunctionHalls] 🏛️ Hall "${hall}": isAvailable=${isAvailable} (available array:`, available, ')');
+              if (!isAvailable) {
+                console.log(`[showAvailableFunctionHalls] ❌ Filtering out unavailable hall: ${hall}`);
+              }
+              return isAvailable; // Only include available halls
+            }).map(hall => {
+              console.log(`[showAvailableFunctionHalls] ✅ Rendering available hall: ${hall}`);
               return `
-              <div class="room-selection-card ${isAvailable ? '' : 'unavailable'}" data-hall-id="${hall}" onclick="${isAvailable ? `toggleHallSelection('${hall}')` : ''}">
+              <div class="room-selection-card" data-hall-id="${hall}" onclick="toggleHallSelection('${hall}')">
                 <div class="room-card-image">
                   <img src="images/Function Hall.JPG" alt="${hall}">
                   <div class="room-selection-indicator">
@@ -1058,7 +1078,7 @@ export function initLuxuryPackages() {
                 <div class="room-card-content">
                   <h4>${hall}</h4>
                   <div class="room-price">${hall.includes('Grand') ? '₱15,000/day' : '₱10,000/day'}</div>
-                  <button class="room-select-btn" ${isAvailable ? '' : 'disabled'}>${isAvailable ? 'Select' : 'Unavailable'}</button>
+                  <button class="room-select-btn">Select</button>
                 </div>
               </div>`;
             }).join('')}
@@ -1068,11 +1088,13 @@ export function initLuxuryPackages() {
         renderFunctionHallsContinueCTA();
       };
       window.toggleHallSelection = function(hallId) {
+        console.log('[toggleHallSelection] 🏛️ Called with hallId:', hallId);
         const cards = document.querySelectorAll('.room-selection-card[data-hall-id]');
         let newlySelected = null;
         cards.forEach(card => {
           const id = card.getAttribute('data-hall-id');
-          if (id === hallId && !card.classList.contains('unavailable')) {
+          if (id === hallId) {
+            console.log('[toggleHallSelection] ✅ Processing selection for hall:', hallId);
             // Enforce single selection: deselect all first
             cards.forEach(other => other.classList.remove('selected'));
             // Toggle current
@@ -1080,6 +1102,7 @@ export function initLuxuryPackages() {
             if (willSelect) {
               card.classList.add('selected');
               newlySelected = hallId;
+              console.log('[toggleHallSelection] ✅ Hall selected:', hallId);
             }
           } else {
             card.classList.remove('selected');
@@ -1088,9 +1111,10 @@ export function initLuxuryPackages() {
         // Update button labels
         cards.forEach(card => {
           const btn = card.querySelector('.room-select-btn');
-          if (btn) btn.textContent = card.classList.contains('selected') ? 'Selected' : (card.classList.contains('unavailable') ? 'Unavailable' : 'Select');
+          if (btn) btn.textContent = card.classList.contains('selected') ? 'Selected' : 'Select';
         });
         window.selectedHallId = newlySelected;
+        console.log('[toggleHallSelection] 🏛️ Final selectedHallId:', window.selectedHallId);
         renderFunctionHallsContinueCTA();
       };
 
@@ -1100,10 +1124,12 @@ export function initLuxuryPackages() {
           cta = document.createElement('button');
           cta.id = 'floating-continue-btn';
           cta.className = 'floating-continue-btn';
-          cta.textContent = 'Continue Booking';
-          cta.onclick = continueFunctionHallBooking;
           document.body.appendChild(cta);
         }
+        // Always update button properties (in case it was used by another category)
+        console.log('[renderFunctionHallsContinueCTA] Setting function hall handler and text');
+        cta.textContent = 'Continue Booking';
+        cta.onclick = continueFunctionHallBooking;
         cta.style.display = 'flex';
         cta.disabled = !window.selectedHallId || !window.functionHallVisitDate;
         const exitBtn = document.getElementById('fh-exit-btn');
@@ -1118,7 +1144,11 @@ export function initLuxuryPackages() {
       window.continueFunctionHallBooking = function() {
         if (!window.selectedHallId || !window.functionHallVisitDate) return;
         if (window.openBookingModal) {
-          const preFill = { date: window.functionHallVisitDate };
+          const preFill = { 
+            date: window.functionHallVisitDate,
+            hallId: window.selectedHallId,
+            hallName: window.selectedHallId // Hall ID is currently the name
+          };
           window.openBookingModal('function-hall', 'Function Hall Booking', preFill, false, null, 'function-halls');
         }
       };
@@ -1136,17 +1166,15 @@ export function initLuxuryPackages() {
       };
 
       window.exitHallSelection = function() {
-        // Hide floating button (don't remove it)
-        const floatingBtn = document.getElementById('floating-continue-btn');
-        if (floatingBtn) floatingBtn.style.display = 'none';
+        // Use centralized reset to clear all states
+        resetFloatingContinueButton();
+        
         // Reset hall view back to category card
         const container = document.getElementById('function-halls-container');
         if (container) {
           container.innerHTML = '<!-- Category card will be inserted here -->';
           setTimeout(() => initializeCategorySection('function-halls', allPackages.functionHalls), 50);
         }
-        window.selectedHallId = null;
-        window.functionHallVisitDate = null;
       };
 
       window.handleHallExitOrCancel = function() {
@@ -1315,9 +1343,33 @@ window.clearSearch = function() {
   }
 };
 
+// Centralized function to reset floating continue button and all category states
+function resetFloatingContinueButton() {
+  console.log('[resetFloatingContinueButton] Resetting all category states and button');
+  
+  // Clear all category selections
+  bookingState.selectedRooms = [];
+  bookingState.selectedCottages = [];
+  window.selectedHallId = null;
+  window.functionHallVisitDate = null;
+  
+  // Reset button
+  const btn = document.getElementById('floating-continue-btn');
+  if (btn) {
+    btn.style.display = 'none';
+    btn.textContent = '';
+    btn.onclick = null;
+    btn.disabled = false;
+    console.log('[resetFloatingContinueButton] Button reset complete');
+  }
+}
+
 // Show available rooms after date selection
 window.showAvailableRooms = async function(checkinDate, checkoutDate) {
   console.log('[showAvailableRooms] Starting with dates:', checkinDate, checkoutDate);
+  
+  // Reset all category states and button before entering room selection
+  resetFloatingContinueButton();
   
   // Exit cottage selection mode if active (only one selection mode at a time)
   const cottagesContainer = document.getElementById('cottages-container');
@@ -1327,19 +1379,12 @@ window.showAvailableRooms = async function(checkinDate, checkoutDate) {
     const isInSelectionMode = cottagesContainer.querySelector('.cottage-selection-grid');
     if (isInSelectionMode) {
       console.log('[showAvailableRooms] Exiting cottage selection mode');
-      bookingState.selectedCottages = [];
       
       // Reset to category cards view
       cottagesContainer.innerHTML = '<!-- Category cards will be inserted here -->';
       setTimeout(() => {
         initializeCottagesSection('cottages', allPackages.cottages);
       }, 100);
-      
-      // Hide floating button if present
-      const floatingBtn = document.getElementById('floating-continue-btn');
-      if (floatingBtn) {
-        floatingBtn.style.display = 'none';
-      }
     }
   }
   
@@ -1366,11 +1411,11 @@ window.showAvailableRooms = async function(checkinDate, checkoutDate) {
           <p style="margin:4px 0 0 0; text-align:left;">Check-in: ${checkinDate} | Check-out: ${checkoutDate}</p>
         </div>
         <div style="display:flex; gap:10px; flex:0 0 auto;">
-          <button class="back-to-calendar-btn" onclick="openCalendarModal('Standard Room', 4, 'rooms')">
+          <button class="back-to-calendar-btn" data-action="rooms-change-dates">
             <svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><line x1=\"19\" y1=\"12\" x2=\"5\" y2=\"12\"></line><polyline points=\"12 19 5 12 12 5\"></polyline></svg>
             Change Dates
           </button>
-          <button id="rooms-exit-btn" class="exit-selection-btn" onclick="handleRoomsExitOrCancel()">
+          <button id="rooms-exit-btn" class="exit-selection-btn" data-action="rooms-exit">
             <svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><line x1=\"18\" y1=\"6\" x2=\"6\" y2=\"18\"></line><line x1=\"6\" y1=\"6\" x2=\"18\" y2=\"18\"></line></svg>
             ${(bookingState.selectedRooms||[]).length>0 ? 'Cancel Selection' : 'Exit'}
           </button>
@@ -1393,7 +1438,7 @@ window.showAvailableRooms = async function(checkinDate, checkoutDate) {
         </svg>
         <h3 style="color: #d84315; margin-bottom: 12px;">No Rooms Available</h3>
         <p style="color: #666; margin-bottom: 20px;">All rooms are fully booked for the selected dates (${checkinDate} to ${checkoutDate}).</p>
-        <button class="btn" onclick="openCalendarModal('Standard Room', 4, 'rooms')" style="background: #1976d2; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer;">Try Different Dates</button>
+        <button class="btn" data-action="rooms-change-dates" style="background: #1976d2; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer;">Try Different Dates</button>
       </div>
     `;
   } else {
@@ -1404,6 +1449,12 @@ window.showAvailableRooms = async function(checkinDate, checkoutDate) {
     });
   }
   
+  // Bind header buttons
+  const changeBtns = roomsContainer.querySelectorAll('[data-action="rooms-change-dates"]');
+  changeBtns.forEach(btn => btn.addEventListener('click', () => openCalendarModal('Standard Room', 4, 'rooms')));
+  const exitBtn = document.getElementById('rooms-exit-btn');
+  if (exitBtn) exitBtn.addEventListener('click', () => handleRoomsExitOrCancel());
+
   // Add floating continue button
   addFloatingContinueButton();
 };
@@ -1413,7 +1464,7 @@ function createRoomSelectionCard(roomId) {
   const card = document.createElement('div');
   card.className = 'room-selection-card';
   card.setAttribute('data-room-id', roomId);
-  card.setAttribute('onclick', `toggleRoomSelection('${roomId}')`);
+  card.addEventListener('click', () => toggleRoomSelection(roomId));
   
   card.innerHTML = `
     <div class="room-card-image">
@@ -1427,9 +1478,11 @@ function createRoomSelectionCard(roomId) {
     <div class="room-card-content">
       <h4>${roomId}</h4>
       <p class="room-price">₱5,500/night</p>
-      <button class="room-select-btn" onclick="event.stopPropagation(); toggleRoomSelection('${roomId}')">Select Room</button>
+      <button class="room-select-btn">Select Room</button>
     </div>
   `;
+  const btn = card.querySelector('.room-select-btn');
+  if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); toggleRoomSelection(roomId); });
   
   return card;
 }
@@ -1530,14 +1583,8 @@ function updateFloatingContinueButton() {
 
 // Exit room selection mode and return to standard room card
 window.exitRoomSelection = function() {
-  // Clear booking state
-  bookingState.reset();
-  
-  // Hide floating continue button (don't remove it)
-  const floatingBtn = document.getElementById('floating-continue-btn');
-  if (floatingBtn) {
-    floatingBtn.style.display = 'none';
-  }
+  // Use centralized reset to clear all states
+  resetFloatingContinueButton();
   
   // Reset rooms section to show Standard Room card
   const roomsSection = document.getElementById('rooms-section');
@@ -1607,6 +1654,9 @@ async function fetchCottageAvailability(visitDate) {
 window.showAvailableCottages = async function(visitDate) {
   console.log('[showAvailableCottages] Starting with date:', visitDate);
   
+  // Reset all category states and button before entering cottage selection
+  resetFloatingContinueButton();
+  
   // Exit room selection mode if active (only one selection mode at a time)
   const roomsContainer = document.getElementById('rooms-container');
   const roomsSection = document.getElementById('rooms-section');
@@ -1615,7 +1665,6 @@ window.showAvailableCottages = async function(visitDate) {
     const isInSelectionMode = roomsContainer.querySelector('.room-selection-grid');
     if (isInSelectionMode) {
       console.log('[showAvailableCottages] Exiting room selection mode');
-      bookingState.selectedRooms = [];
       
       // Reset to category card view
       roomsContainer.innerHTML = '<!-- Category card will be inserted here -->';
@@ -1932,20 +1981,8 @@ function updateFloatingCottageContinueButton() {
 window.exitCottageSelection = function() {
   console.log('[exitCottageSelection] Exiting cottage selection, returning to category card');
   
-  // Clear cottage selections
-  bookingState.selectedCottages = [];
-  
-  // Clear the selected date from bookingState
-  if (bookingState.dates) {
-    bookingState.dates.checkin = null;
-    bookingState.dates.checkout = null;
-  }
-  
-  // Hide floating continue button (don't remove it)
-  const floatingBtn = document.getElementById('floating-continue-btn');
-  if (floatingBtn) {
-    floatingBtn.style.display = 'none';
-  }
+  // Use centralized reset to clear all states
+  resetFloatingContinueButton();
   
   // Reset cottages section to show category cards
   const cottagesSection = document.getElementById('cottages-section');

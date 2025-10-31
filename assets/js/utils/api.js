@@ -208,10 +208,30 @@ export async function checkAvailability(packageId, checkIn, checkOut, category =
     console.log('[MockDB] Checking availability via mock API...', excludeBookingId ? `(excluding booking ${excludeBookingId})` : '');
     const url = `/bookings/availability/${packageId}?${queryParams}`;
     const data = await mockApiRequest(url, { method: 'GET' });
+    
+    // Detailed response logging for debugging
+    console.log('[API Response] 📦 Full availability response:', data);
+    console.log('[API Response] 📦 Response keys:', Object.keys(data || {}));
+    if (data?.dateAvailability) {
+      console.log('[API Response] 📦 dateAvailability keys:', Object.keys(data.dateAvailability));
+      console.log('[API Response] 📦 dateAvailability structure:', data.dateAvailability);
+    }
+    if (category === 'function-halls') {
+      console.log('[API Response] 🏛️ Function halls response - checking for availableHalls/bookedHalls');
+      Object.entries(data?.dateAvailability || {}).forEach(([date, dayData]) => {
+        console.log(`[API Response] 🏛️ ${date}: availableHalls=${JSON.stringify(dayData.availableHalls)}, bookedHalls=${JSON.stringify(dayData.bookedHalls)}`);
+      });
+    }
+    
     return data;
   } else {
     const url = `/bookings/availability/${packageId}?${queryParams}`;
     const data = await apiRequest(url, { method: 'GET' });
+    
+    // Log response for real API too
+    console.log('[API Response] 📦 Full availability response:', data);
+    console.log('[API Response] 📦 Response keys:', Object.keys(data || {}));
+    
     return data;
   }
 }
@@ -338,16 +358,10 @@ export async function createBooking(bookingData) {
     console.log(`[BookingAPI] Created booking using ${USE_MOCK_BOOKINGS ? 'mock' : 'real'} API`);
     return data.data;
   } else {
+    // Send full payload so backend can persist items and meta
     const data = await apiRequest('/bookings', {
       method: 'POST',
-      body: JSON.stringify({
-        packageId: bookingData.packageId,
-        checkIn: bookingData.checkIn,
-        checkOut: bookingData.checkOut,
-        guests: bookingData.guests,
-        userId: bookingData.userId,
-        email: bookingData.email
-      })
+      body: JSON.stringify(bookingData)
     });
     console.log(`[BookingAPI] Created booking using ${USE_MOCK_BOOKINGS ? 'mock' : 'real'} API`);
     return data.data;

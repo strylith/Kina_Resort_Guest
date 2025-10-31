@@ -197,7 +197,7 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
     console.log('[BookingModal] Edit mode with cottages detected, setting addCottageToRoom=true');
   }
   
-  // Handle pre-fill data (dates, selected rooms/cottages, etc.)
+  // Handle pre-fill data (dates, selected rooms/cottages/function-hall, etc.)
   if (preFillData) {
     if (editMode) {
       console.log('[BookingModal] Edit mode: Loading pre-fill data into form state');
@@ -244,6 +244,33 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
       bookingFormState.selectedRoomsFromFlow = [];
       bookingFormState.selectedCottagesFromFlow = [];
     }
+    // Map function-hall specific prefill fields into a simple formData cache for rendering defaults
+    if (initialType === 'function-hall') {
+      bookingFormState.formData = {
+        eventDate: preFillData.eventDate || preFillData.date || null,
+        startTime: preFillData.startTime || null,
+        endTime: preFillData.endTime || null,
+        eventName: preFillData.eventName || null,
+        eventType: preFillData.eventType || null,
+        setupType: preFillData.setupType || null,
+        decorationTheme: preFillData.decorationTheme || null,
+        organization: preFillData.organization || null,
+        guestCount: preFillData.guestCount || null,
+        hallId: preFillData.hallId || null,
+        hallName: preFillData.hallName || null,
+        soundSystemRequired: !!preFillData.soundSystemRequired,
+        projectorRequired: !!preFillData.projectorRequired,
+        cateringRequired: !!preFillData.cateringRequired,
+        equipmentAddons: Array.isArray(preFillData.equipmentAddons) ? preFillData.equipmentAddons : []
+      };
+      // Also reflect hall info in preFillDates used by selected-hall header
+      bookingFormState.preFillDates = {
+        ...(bookingFormState.preFillDates || {}),
+        date: (bookingFormState.preFillDates && (bookingFormState.preFillDates.date || bookingFormState.preFillDates.eventDate)) || preFillData.eventDate || preFillData.date || null,
+        hallId: preFillData.hallId || bookingFormState.preFillDates?.hallId || null,
+        hallName: preFillData.hallName || bookingFormState.preFillDates?.hallName || null
+      };
+    }
   } else {
     bookingFormState.preFillDates = null;
     bookingFormState.selectedRoomsFromFlow = [];
@@ -256,7 +283,7 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
   const modalHTML = `
     <div class="booking-modal-overlay" id="booking-modal-overlay">
       <div class="booking-modal">
-        <button class="booking-modal-close" onclick="closeBookingModal()" aria-label="Close booking modal" title="Close">
+        <button class="booking-modal-close" id="booking-modal-close" aria-label="Close booking modal" title="Close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -268,7 +295,7 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
           <p class="booking-subtitle">${bookingFormState.editMode ? 'Update your booking details below' : 'Complete your booking details below'}</p>
         </div>
         
-        <form class="booking-form" id="booking-form" onsubmit="submitBooking(event)">
+        <form class="booking-form" id="booking-form">
           <div class="booking-form-content">
             ${renderFormFields(initialType)}
           </div>
@@ -286,6 +313,10 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
       closeBookingModal();
     }
   });
+  const closeBtn = document.getElementById('booking-modal-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => closeBookingModal());
+  const formEl = document.getElementById('booking-form');
+  if (formEl) formEl.addEventListener('submit', (e) => { e.preventDefault(); window.submitBooking && window.submitBooking(e); });
   
   // Prevent background scrolling when modal is open
   document.body.style.overflow = 'hidden';
@@ -476,14 +507,14 @@ function renderRoomFields() {
       
       <div class="date-time-group">
         <div class="form-field">
-          <label for="checkin-date" class="form-label">Check-in Date *</label>
-          <input type="date" id="checkin-date" name="checkinDate" class="form-input" onclick="openCalendarForCheckin()" readonly data-required="true">
+          <label for="checkin-date" class="form-label">Check-in Date *</nlabel>
+          <input type="date" id="checkin-date" name="checkinDate" class="form-input" readonly data-required="true">
           <div class="form-error" id="checkin-date-error"></div>
         </div>
         
         <div class="form-field">
           <label for="checkout-date" class="form-label">Check-out Date *</label>
-          <input type="date" id="checkout-date" name="checkoutDate" class="form-input" onclick="openCalendarForCheckout()" readonly data-required="true">
+          <input type="date" id="checkout-date" name="checkoutDate" class="form-input" readonly data-required="true">
           <div class="form-error" id="checkout-date-error"></div>
         </div>
       </div>
@@ -601,18 +632,40 @@ function renderCottageFields() {
 
 // Render function hall booking fields
 function renderFunctionHallFields() {
+  const hallName = bookingFormState.preFillDates?.hallName || 'Not selected';
+  const isGrand = hallName.includes('Grand');
+  const hallPrice = isGrand ? '₱15,000/day' : '₱10,000/day';
+  const hallCapacity = isGrand ? 'Capacity: 200 guests' : 'Capacity: 100 guests';
+  const fh = bookingFormState.formData || {};
+  
   return `
     <div class="form-section">
+      <div class="selected-hall-display" style="background: var(--color-bg); padding: 16px; border-radius: 12px; margin-bottom: 24px; border: 2px solid var(--color-primary);">
+        <h4 style="margin: 0 0 8px; color: var(--color-text);">Selected Function Hall</h4>
+        <div style="font-size: 18px; font-weight: 600; color: var(--color-primary);">
+          ${hallName}
+        </div>
+        <div style="font-size: 14px; color: var(--color-muted); margin-top: 4px;">
+          ${hallPrice} • ${hallCapacity}
+        </div>
+      </div>
+      
       <h3>Event Details</h3>
       
       <div class="form-field">
         <label for="organization" class="form-label">Organization (Optional)</label>
-        <input type="text" id="organization" name="organization" class="form-input" placeholder="Company or organization name">
+        <input type="text" id="organization" name="organization" class="form-input" placeholder="Company or organization name" value="${fh.organization || ''}">
+      </div>
+      
+      <div class="form-field">
+        <label for="event-name" class="form-label">Event Name *</label>
+        <input type="text" id="event-name" name="eventName" class="form-input" placeholder="e.g., Corporate Seminar, Wedding Reception" data-required="true" value="${fh.eventName || ''}">
+        <div class="form-error" id="event-name-error"></div>
       </div>
       
       <div class="form-field">
         <label for="event-date" class="form-label">Event Date *</label>
-        <input type="date" id="event-date" name="eventDate" class="form-input" onclick="openCalendarForFunctionHall()" readonly data-required="true">
+        <input type="date" id="event-date" name="eventDate" class="form-input" onclick="openCalendarForFunctionHall()" readonly data-required="true" value="${fh.eventDate || bookingFormState.preFillDates?.date || ''}">
         <div class="form-error" id="event-date-error"></div>
       </div>
       
@@ -621,12 +674,12 @@ function renderFunctionHallFields() {
         <div style="display: flex; gap: 12px; align-items: center;">
           <div style="flex: 1;">
             <label for="event-start" class="form-label" style="font-size: 0.9em; margin-bottom: 4px;">Start Time</label>
-            <input type="time" id="event-start" name="eventStart" class="form-input" required>
+            <input type="time" id="event-start" name="eventStart" class="form-input" required value="${fh.startTime || ''}">
             <div class="form-error" id="event-start-error"></div>
           </div>
           <div style="flex: 1;">
             <label for="event-end" class="form-label" style="font-size: 0.9em; margin-bottom: 4px;">End Time</label>
-            <input type="time" id="event-end" name="eventEnd" class="form-input" required>
+            <input type="time" id="event-end" name="eventEnd" class="form-input" required value="${fh.endTime || ''}">
             <div class="form-error" id="event-end-error"></div>
           </div>
         </div>
@@ -634,25 +687,82 @@ function renderFunctionHallFields() {
       
       <div class="form-field">
         <label for="event-type" class="form-label">Event Type *</label>
-        <select id="event-type" name="eventType" class="form-select" required>
-          <option value="">Select Event Type</option>
-          <option value="wedding">Wedding</option>
-          <option value="birthday">Birthday Party</option>
-          <option value="conference">Conference</option>
-          <option value="meeting">Meeting</option>
-          <option value="other">Other</option>
+        <select id="event-type" name="eventType" class="form-select" required data-required="true">
+          <option value="" ${!fh.eventType ? 'selected' : ''}>Select Event Type</option>
+          <option value="wedding" ${fh.eventType==='wedding'?'selected':''}>Wedding</option>
+          <option value="birthday" ${fh.eventType==='birthday'?'selected':''}>Birthday Party</option>
+          <option value="conference" ${fh.eventType==='conference'?'selected':''}>Conference</option>
+          <option value="meeting" ${fh.eventType==='meeting'?'selected':''}>Meeting</option>
+          <option value="other" ${fh.eventType==='other'?'selected':''}>Other</option>
         </select>
         <div class="form-error" id="event-type-error"></div>
       </div>
       
       <div class="form-field">
+        <label for="setup-type" class="form-label">Setup Type *</label>
+        <select id="setup-type" name="setupType" class="form-select" required data-required="true">
+          <option value="" ${!fh.setupType ? 'selected' : ''}>Select Setup Type</option>
+          <option value="banquet" ${fh.setupType==='banquet'?'selected':''}>Banquet</option>
+          <option value="theater" ${fh.setupType==='theater'?'selected':''}>Theater</option>
+          <option value="classroom" ${fh.setupType==='classroom'?'selected':''}>Classroom</option>
+          <option value="other" ${fh.setupType==='other'?'selected':''}>Other</option>
+        </select>
+        <div class="form-error" id="setup-type-error"></div>
+      </div>
+      
+      <div class="form-field">
         <label for="event-guests" class="form-label">Number of Guests *</label>
-        <input type="number" id="event-guests" name="eventGuests" class="form-input" min="1" required>
+        <input type="number" id="event-guests" name="eventGuests" class="form-input" min="1" required data-required="true" value="${fh.guestCount || ''}">
         <div class="form-error" id="event-guests-error"></div>
       </div>
       
       <div class="form-field">
-        
+        <label for="decoration-theme" class="form-label">Decoration Theme (Optional)</label>
+        <input type="text" id="decoration-theme" name="decorationTheme" class="form-input" placeholder="e.g., Rustic, Modern, Elegant" value="${fh.decorationTheme || ''}">
+      </div>
+      
+      <div class="form-field">
+        <label class="form-label">Equipment Requirements</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="sound-system" name="soundSystem" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.soundSystemRequired ? 'checked' : ''}>
+            <span>Sound System Required</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="projector" name="projector" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.projectorRequired ? 'checked' : ''}>
+            <span>Projector/Screen Required</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="catering-required" name="cateringRequired" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.cateringRequired ? 'checked' : ''}>
+            <span>Catering Required</span>
+          </label>
+        </div>
+      </div>
+      
+      <div class="form-field">
+        <label class="form-label">Additional Equipment Add-ons</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" name="equipmentAddons" value="microphone" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('microphone')?'checked':''}>
+            <span>Microphone</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" name="equipmentAddons" value="stage" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('stage')?'checked':''}>
+            <span>Stage</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" name="equipmentAddons" value="lighting" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('lighting')?'checked':''}>
+            <span>Lighting</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" name="equipmentAddons" value="extra-chairs" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-chairs')?'checked':''}>
+            <span>Extra Chairs</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" name="equipmentAddons" value="extra-tables" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-tables')?'checked':''}>
+            <span>Extra Tables</span>
+          </label>
+        </div>
       </div>
       
       <div class="form-field">
@@ -2282,6 +2392,12 @@ function initializeForm() {
   const checkinInput = document.getElementById('checkin-date');
   const checkoutInput = document.getElementById('checkout-date');
   const nightsDisplay = document.getElementById('nights-display');
+  if (checkinInput) {
+    checkinInput.addEventListener('click', (e) => { e.preventDefault(); openCalendarForCheckin(); });
+  }
+  if (checkoutInput) {
+    checkoutInput.addEventListener('click', (e) => { e.preventDefault(); openCalendarForCheckout(); });
+  }
   
   if (checkinInput && checkoutInput && nightsDisplay) {
     const calculateNights = () => {
@@ -2736,10 +2852,61 @@ function validateForm() {
   }
   
   if (bookingFormState.reservationType === 'function-hall') {
-    const selectedHall = document.querySelector('input[name="selectedHall"]:checked');
-    if (!selectedHall) {
+    // Validate event name
+    const eventName = document.getElementById('event-name');
+    if (!eventName?.value?.trim()) {
       isValid = false;
-      showFieldError('hall-selection-error', 'Please select a function hall');
+      showFieldError('event-name', 'Event name is required');
+    }
+    
+    // Validate event date
+    const eventDate = document.getElementById('event-date');
+    if (!eventDate?.value) {
+      isValid = false;
+      showFieldError('event-date', 'Event date is required');
+    }
+    
+    // Validate event time range
+    const eventStart = document.getElementById('event-start');
+    const eventEnd = document.getElementById('event-end');
+    if (!eventStart?.value) {
+      isValid = false;
+      showFieldError('event-start', 'Start time is required');
+    }
+    if (!eventEnd?.value) {
+      isValid = false;
+      showFieldError('event-end', 'End time is required');
+    }
+    if (eventStart?.value && eventEnd?.value && eventEnd.value <= eventStart.value) {
+      isValid = false;
+      showFieldError('event-end', 'End time must be after start time');
+    }
+    
+    // Validate event type
+    const eventType = document.getElementById('event-type');
+    if (!eventType?.value) {
+      isValid = false;
+      showFieldError('event-type', 'Event type is required');
+    }
+    
+    // Validate setup type
+    const setupType = document.getElementById('setup-type');
+    if (!setupType?.value) {
+      isValid = false;
+      showFieldError('setup-type', 'Setup type is required');
+    }
+    
+    // Validate guest count
+    const eventGuests = document.getElementById('event-guests');
+    if (!eventGuests?.value || parseInt(eventGuests.value) < 1) {
+      isValid = false;
+      showFieldError('event-guests', 'Number of guests must be at least 1');
+    }
+    
+    // Validate hall selection (should be set from flow)
+    if (!bookingFormState.preFillDates?.hallId && !window.selectedHallId) {
+      isValid = false;
+      alert('Please select a function hall before continuing');
     }
   }
   
@@ -2794,6 +2961,23 @@ async function saveBooking(bookingData) {
       if (bookingData.dates.endTime) bookingPayload.end_time = bookingData.dates.endTime;
     }
     
+    if (category === 'function-halls') {
+      bookingPayload.hallId = bookingData.selections?.hallId;
+      bookingPayload.hallName = bookingData.selections?.hallName;
+      bookingPayload.eventName = bookingData.selections?.eventName;
+      bookingPayload.eventType = bookingData.selections?.eventType;
+      bookingPayload.setupType = bookingData.selections?.setupType;
+      bookingPayload.decorationTheme = bookingData.selections?.decorationTheme;
+      bookingPayload.organization = bookingData.selections?.organization;
+      bookingPayload.soundSystemRequired = bookingData.selections?.soundSystemRequired || false;
+      bookingPayload.projectorRequired = bookingData.selections?.projectorRequired || false;
+      bookingPayload.cateringRequired = bookingData.selections?.cateringRequired || false;
+      bookingPayload.equipmentAddons = bookingData.selections?.equipmentAddons || [];
+      bookingPayload.startTime = bookingData.dates?.startTime;
+      bookingPayload.endTime = bookingData.dates?.endTime;
+      bookingPayload.selectedHall = bookingData.selections?.hallId; // Keep for backward compatibility
+    }
+    
     // Preview payload shapes per category (UI step only)
     if (category === 'cottages') {
       const preview = {
@@ -2811,14 +2995,21 @@ async function saveBooking(bookingData) {
     } else if (category === 'function-halls') {
       const preview = {
         category: 'function-hall',
+        hall_id: bookingData.selections?.hallId,
+        hall_name: bookingData.selections?.hallName,
+        event_name: bookingData.selections?.eventName,
         event_type: bookingData.selections?.eventType,
         event_date: bookingData.dates?.eventDate,
         start_time: bookingData.dates?.startTime,
         end_time: bookingData.dates?.endTime,
-        selected_hall: bookingData.selections?.hall,
+        setup_type: bookingData.selections?.setupType,
+        decoration_theme: bookingData.selections?.decorationTheme,
+        organization: bookingData.selections?.organization,
         guest_count: Number(bookingData.guests?.total || 0),
-        catering: bookingData.selections?.catering || false,
-        setup_details: bookingData.selections?.setupDetails || '',
+        sound_system_required: bookingData.selections?.soundSystemRequired || false,
+        projector_required: bookingData.selections?.projectorRequired || false,
+        catering_required: bookingData.selections?.cateringRequired || false,
+        equipment_addons: bookingData.selections?.equipmentAddons || [],
         special_requests: bookingData.selections?.specialRequests || '',
         guest_info: bookingData.guestInfo,
         payment_mode: bookingData.payment,
@@ -2883,6 +3074,23 @@ async function updateExistingBooking(bookingId, bookingData) {
       bookingPayload.duration_type = bookingData.dates.duration_type || bookingData.dates.durationType;
       if (bookingData.dates.startTime) bookingPayload.start_time = bookingData.dates.startTime;
       if (bookingData.dates.endTime) bookingPayload.end_time = bookingData.dates.endTime;
+    }
+    
+    if (category === 'function-halls') {
+      bookingPayload.hallId = bookingData.selections?.hallId;
+      bookingPayload.hallName = bookingData.selections?.hallName;
+      bookingPayload.eventName = bookingData.selections?.eventName;
+      bookingPayload.eventType = bookingData.selections?.eventType;
+      bookingPayload.setupType = bookingData.selections?.setupType;
+      bookingPayload.decorationTheme = bookingData.selections?.decorationTheme;
+      bookingPayload.organization = bookingData.selections?.organization;
+      bookingPayload.soundSystemRequired = bookingData.selections?.soundSystemRequired || false;
+      bookingPayload.projectorRequired = bookingData.selections?.projectorRequired || false;
+      bookingPayload.cateringRequired = bookingData.selections?.cateringRequired || false;
+      bookingPayload.equipmentAddons = bookingData.selections?.equipmentAddons || [];
+      bookingPayload.startTime = bookingData.dates?.startTime;
+      bookingPayload.endTime = bookingData.dates?.endTime;
+      bookingPayload.selectedHall = bookingData.selections?.hallId; // Keep for backward compatibility
     }
     
     console.log('[Booking] Update payload:', JSON.stringify(bookingPayload, null, 2));
@@ -3099,14 +3307,21 @@ window.submitBooking = async function(event) {
       endTime: formData.get('eventEnd')
     };
     bookingData.selections = {
-      hall: formData.get('selectedHall'),
+      hallId: bookingFormState.preFillDates?.hallId || window.selectedHallId,
+      hallName: bookingFormState.preFillDates?.hallName || window.selectedHallId,
+      eventName: formData.get('eventName'),
       eventType: formData.get('eventType'),
-      specialRequests: formData.get('specialRequests'),
-      catering: document.getElementById('catering-required')?.checked || false,
-      setupDetails: formData.get('setupDetails')
+      setupType: formData.get('setupType'),
+      decorationTheme: formData.get('decorationTheme'),
+      organization: formData.get('organization'),
+      soundSystemRequired: document.getElementById('sound-system')?.checked || false,
+      projectorRequired: document.getElementById('projector')?.checked || false,
+      cateringRequired: document.getElementById('catering-required')?.checked || false,
+      equipmentAddons: Array.from(formData.getAll('equipmentAddons')),
+      specialRequests: formData.get('specialRequests')
     };
     bookingData.guests = {
-      total: formData.get('eventGuests')
+      total: parseInt(formData.get('eventGuests') || 0)
     };
   }
   
@@ -3184,6 +3399,25 @@ window.submitBooking = async function(event) {
           console.error('[Booking] Availability check failed: Overall availability is false');
           const { showToast } = await import('./toast.js');
           showToast('No rooms available for the selected dates. Please choose different dates.', 'error');
+          return;
+        }
+      }
+    }
+    // Validate availability for function halls (single-day)
+    if (bookingFormState.reservationType === 'function-hall') {
+      const eventDate = bookingData.dates.eventDate;
+      const hallId = bookingData.selections.hallId || bookingData.selections.hallName;
+      if (eventDate && hallId) {
+        const { checkAvailability } = await import('../utils/api.js');
+        const excludeBookingId = bookingFormState.editMode && bookingFormState.bookingId ? bookingFormState.bookingId : null;
+        const result = await checkAvailability(1, eventDate, eventDate, 'function-halls', excludeBookingId);
+        const availableHalls = result?.dateAvailability?.[eventDate]?.availableHalls
+          || result?.availableHalls
+          || result?.availableItems
+          || [];
+        if (!Array.isArray(availableHalls) || !availableHalls.includes(hallId)) {
+          const { showToast } = await import('./toast.js');
+          showToast(`Selected hall is not available on ${eventDate}. Please choose a different date or hall.`, 'error');
           return;
         }
       }
@@ -3329,6 +3563,32 @@ function showBookingSuccess(bookingData, savedBooking) {
   
   // Build cottages list
   let cottagesList = '';
+  // Build function hall details
+  let functionHallDetails = '';
+  if (bookingData.reservationType === 'function-hall') {
+    const fh = bookingData.selections || {};
+    functionHallDetails = `
+      <div class="success-section">
+        <h4>Function Hall Details</h4>
+        <ul class="booking-items-list">
+          <li><strong>Hall:</strong> ${fh.hallName || fh.hallId || 'N/A'}</li>
+          <li><strong>Date:</strong> ${bookingData.dates.eventDate || 'N/A'}</li>
+          <li><strong>Time:</strong> ${(bookingData.dates.startTime || '') && (bookingData.dates.endTime || '') ? `${bookingData.dates.startTime} - ${bookingData.dates.endTime}` : 'N/A'}</li>
+          <li><strong>Guests:</strong> ${bookingData.guests?.total || 'N/A'}</li>
+          <li><strong>Event:</strong> ${fh.eventName || 'N/A'} (${fh.eventType || 'type N/A'})</li>
+          <li><strong>Setup:</strong> ${fh.setupType || 'N/A'}</li>
+          ${fh.decorationTheme ? `<li><strong>Theme:</strong> ${fh.decorationTheme}</li>` : ''}
+          ${fh.organization ? `<li><strong>Organization:</strong> ${fh.organization}</li>` : ''}
+          <li><strong>Requirements:</strong> ${[
+            fh.soundSystemRequired ? 'Sound System' : null,
+            fh.projectorRequired ? 'Projector/Screen' : null,
+            fh.cateringRequired ? 'Catering' : null
+          ].filter(Boolean).join(', ') || 'None'}</li>
+          ${Array.isArray(fh.equipmentAddons) && fh.equipmentAddons.length ? `<li><strong>Add-ons:</strong> ${fh.equipmentAddons.join(', ')}</li>` : ''}
+        </ul>
+      </div>
+    `;
+  }
   if (selectedCottages.length > 0) {
     // Get cottage dates if available
     const cottageDates = bookingFormState.cottageDates || bookingData.dates.cottageDates || [];
@@ -3403,6 +3663,7 @@ function showBookingSuccess(bookingData, savedBooking) {
           
           ${roomsList}
           ${cottagesList}
+          ${functionHallDetails}
         </div>
         
         <div class="success-actions">

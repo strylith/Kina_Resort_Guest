@@ -245,30 +245,54 @@ export const bookingState = {
   
   // Get available function halls for a single day (no check-out needed)
   async getAvailableFunctionHalls(visitDate) {
-    if (!visitDate) return [];
+    if (!visitDate) {
+      console.warn('[BookingState] getAvailableFunctionHalls called without visitDate');
+      return [];
+    }
+    
+    console.log(`[BookingState] 🏛️ Getting available function halls for ${visitDate}`);
+    
     try {
       const { checkAvailability } = await import('./api.js');
       // Use same date for both params since booking is day-use
       const result = await checkAvailability(1, visitDate, visitDate, 'function-halls');
       
-      // Prefer server-provided list if available
+      console.log('[BookingState] 🏛️ Full API result:', result);
+      console.log('[BookingState] 🏛️ dateAvailability keys:', result?.dateAvailability ? Object.keys(result.dateAvailability) : 'N/A');
+      
+      // CORRECT PATH: Check dateAvailability first (this is what mock API returns)
+      if (result && result.dateAvailability && result.dateAvailability[visitDate]) {
+        const day = result.dateAvailability[visitDate];
+        console.log(`[BookingState] 🏛️ Day data for ${visitDate}:`, day);
+        
+        if (Array.isArray(day?.availableHalls)) {
+          console.log(`[BookingState] ✅ Found availableHalls in dateAvailability[${visitDate}]:`, day.availableHalls);
+          return day.availableHalls;
+        }
+        if (Array.isArray(day?.availableItems)) {
+          console.log(`[BookingState] ✅ Found availableItems in dateAvailability[${visitDate}]:`, day.availableItems);
+          return day.availableItems;
+        }
+      } else {
+        console.warn(`[BookingState] ⚠️ No dateAvailability entry for ${visitDate}. Available keys:`, result?.dateAvailability ? Object.keys(result.dateAvailability) : 'none');
+      }
+      
+      // Secondary: Check root-level fields (for compatibility with different API formats)
       if (Array.isArray(result?.availableHalls)) {
+        console.log('[BookingState] ✅ Found availableHalls at root:', result.availableHalls);
         return result.availableHalls;
       }
       if (Array.isArray(result?.availableItems)) {
+        console.log('[BookingState] ✅ Found availableItems at root:', result.availableItems);
         return result.availableItems;
       }
       
-      if (result && result.dateAvailability && result.dateAvailability[visitDate]) {
-        const day = result.dateAvailability[visitDate];
-        if (Array.isArray(day?.availableHalls)) return day.availableHalls;
-        if (Array.isArray(day?.availableItems)) return day.availableItems;
-      }
-      
       // Fallback: both halls available
+      console.warn('[BookingState] ⚠️ No availability data found, falling back to all halls:', this.allFunctionHalls);
       return this.allFunctionHalls;
     } catch (error) {
-      console.error('[BookingState] Error fetching function hall availability:', error);
+      console.error('[BookingState] ❌ Error fetching function hall availability:', error);
+      console.warn('[BookingState] ⚠️ Falling back to all halls due to error');
       return this.allFunctionHalls;
     }
   },

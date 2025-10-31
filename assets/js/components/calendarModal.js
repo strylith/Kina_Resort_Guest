@@ -1239,7 +1239,7 @@ async function updateCalendarDisplay(year = null, month = null) {
 }
 
 // Open booking modal with selected dates
-function openBookingWithDates() {
+async function openBookingWithDates() {
   let reservationType = 'room';
   let preFillDates = {};
   
@@ -1336,6 +1336,120 @@ function openBookingWithDates() {
       if (window.showAvailableFunctionHalls) {
         window.showAvailableFunctionHalls(visitDate, visitDate);
         return;
+      }
+      // Local fallback: render function hall selection if global handler isn't available
+      if (visitDate) {
+        try {
+          await (async function localShowAvailableFunctionHalls(checkin, checkout) {
+          const container = document.getElementById('function-halls-container');
+          // If there's no dedicated container on this page, create a simple full-screen layer
+          let host = container;
+          if (!host) {
+            host = document.createElement('div');
+            host.id = 'function-halls-container';
+            host.style.position = 'fixed';
+            host.style.inset = '0';
+            host.style.background = 'rgba(255,255,255,0.98)';
+            host.style.zIndex = '9999';
+            host.style.overflow = 'auto';
+            document.body.appendChild(host);
+          }
+
+          host.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--color-muted);">Checking availability...</div>';
+
+          const visit = checkin || null;
+          window.functionHallVisitDate = visit;
+          let available = [];
+          try {
+            const { checkAvailability } = await import('../utils/api.js');
+            const result = visit ? await checkAvailability(1, visit, visit, 'function-halls') : null;
+            available = (result?.dateAvailability?.[visit]?.availableHalls) || result?.availableHalls || [];
+          } catch (_) {
+            available = [];
+          }
+
+          let halls = [];
+          try {
+            const mod = await import('../utils/bookingState.js');
+            halls = mod.bookingState?.allFunctionHalls || ['Grand Function Hall','Intimate Function Hall'];
+          } catch (_) {
+            halls = ['Grand Function Hall','Intimate Function Hall'];
+          }
+
+          host.innerHTML = `
+            <div class="fh-wrap" style="width:100%; max-width:1100px; margin:40px auto; padding: 0 16px;">
+              <div class="room-selection-header" style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                <div style="min-width:240px; flex:1 1 auto;">
+                  <h4 style="margin:0; text-align:left;">Select Your Function Hall</h4>
+                  <p style="margin:4px 0 0 0; text-align:left;">${visit ? `Date: ${visit}` : 'Pick a date to view availability'}</p>
+                </div>
+                <div style="display:flex; gap:10px; flex:0 0 auto;">
+                  <button class="back-to-calendar-btn" onclick="openCalendarModal('Function Hall Booking', 5, 'function-halls')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                    Change Dates
+                  </button>
+                  <button id="fh-exit-btn" class="exit-selection-btn" onclick="(function(){ const layer=document.getElementById('function-halls-container'); if(layer && layer.parentNode){layer.parentNode.removeChild(layer);} window.selectedHallId=null; })()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    Exit
+                  </button>
+                </div>
+              </div>
+              <div class="room-selection-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:16px;">
+                ${halls.filter(hall => Array.isArray(available) && available.includes(hall)).map(hall => {
+                  return `
+                  <div class="room-selection-card" data-hall-id="${hall}">
+                    <div class="room-card-image">
+                      <img src="images/Function Hall.JPG" alt="${hall}">
+                      <div class="room-selection-indicator">
+                        <svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"M20 6L9 17l-5-5\"></path></svg>
+                      </div>
+                    </div>
+                    <div class="room-card-content">
+                      <h4>${hall}</h4>
+                      <div class="room-price">${hall.includes('Grand') ? '₱15,000/day' : '₱10,000/day'}</div>
+                      <button class="room-select-btn">Select</button>
+                    </div>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+
+          // Attach interactions using onclick handlers (matching packages.js approach)
+          const cards = host.querySelectorAll('.room-selection-card[data-hall-id]');
+          cards.forEach(card => {
+            const id = card.getAttribute('data-hall-id');
+            card.setAttribute('onclick', `toggleHallSelection('${id}')`);
+          });
+
+          // Call the global button renderer if available, otherwise create local fallback
+          if (typeof window.renderFunctionHallsContinueCTA === 'function') {
+            window.renderFunctionHallsContinueCTA();
+          } else {
+            // Fallback: create button directly
+            let cta = document.getElementById('floating-continue-btn');
+            if (!cta) {
+              cta = document.createElement('button');
+              cta.id = 'floating-continue-btn';
+              cta.className = 'floating-continue-btn';
+              cta.textContent = 'Continue Booking';
+              cta.onclick = function() {
+                if (!window.selectedHallId || !window.functionHallVisitDate) return;
+                if (window.openBookingModal) {
+                  const preFill = { date: window.functionHallVisitDate, hallId: window.selectedHallId, hallName: window.selectedHallId };
+                  window.openBookingModal('function-hall', 'Function Hall Booking', preFill, false, null, 'function-halls');
+                }
+              };
+              document.body.appendChild(cta);
+            }
+            cta.style.display = 'flex';
+            cta.disabled = !window.selectedHallId || !window.functionHallVisitDate;
+          }
+        })(visitDate, visitDate);
+        return;
+        } catch (e) {
+          // If fallback fails, proceed to open modal directly as a last resort
+          console.warn('[Calendar] Local hall selection fallback failed:', e);
+        }
       }
     }
     

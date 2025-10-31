@@ -181,6 +181,28 @@ export async function MyBookingsPage() {
         })),
         guests: booking.guests
       };
+
+      // Function hall prefill: event date and selected hall from booking_items
+      const functionHalls = bookingItems.filter(item => item.item_type === 'function-hall');
+      if (functionHalls.length > 0) {
+        const fhItem = functionHalls[0];
+        preFillData.eventDate = fhItem.usage_date || booking.check_in;
+        preFillData.hallId = fhItem.item_id;
+        preFillData.hallName = fhItem.item_id;
+        // If booking contains meta fields (dev/mock), propagate them for seamless re-edit
+        preFillData.eventName = booking.event_name || booking.selections?.eventName;
+        preFillData.eventType = booking.event_type || booking.selections?.eventType;
+        preFillData.setupType = booking.setup_type || booking.selections?.setupType;
+        preFillData.startTime = booking.start_time || booking.dates?.startTime;
+        preFillData.endTime = booking.end_time || booking.dates?.endTime;
+        preFillData.decorationTheme = booking.decoration_theme || booking.selections?.decorationTheme;
+        preFillData.organization = booking.organization || booking.selections?.organization;
+        preFillData.guestCount = (typeof booking.guests === 'object' ? booking.guests.total : booking.guests) || null;
+        preFillData.soundSystemRequired = booking.sound_system_required || booking.selections?.soundSystemRequired || false;
+        preFillData.projectorRequired = booking.projector_required || booking.selections?.projectorRequired || false;
+        preFillData.cateringRequired = booking.catering_required || booking.selections?.cateringRequired || false;
+        preFillData.equipmentAddons = booking.equipment_addons || booking.selections?.equipmentAddons || [];
+      }
       
       console.log('[Re-Edit] Pre-fill data prepared:', preFillData);
       

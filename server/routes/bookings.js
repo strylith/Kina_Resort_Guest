@@ -127,6 +127,16 @@ router.get('/availability/:packageId', async (req, res) => {
       allItems = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
     } else if (itemType === 'cottage') {
       allItems = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+    } else if (itemType === 'function-hall') {
+      try {
+        const { data: halls } = await db
+          .from('packages')
+          .select('title')
+          .eq('category', 'function-halls');
+        allItems = Array.isArray(halls) && halls.length > 0 ? halls.map(h => h.title) : ['Grand Function Hall', 'Intimate Function Hall'];
+      } catch (_) {
+        allItems = ['Grand Function Hall', 'Intimate Function Hall'];
+      }
     } else {
       allItems = [];
     }
@@ -209,6 +219,14 @@ router.get('/availability/:packageId', async (req, res) => {
         } else {
           status = 'cottage-booked-partial';
         }
+      } else if (itemType === 'function-hall') {
+        if (bookedIds.length === 0) {
+          status = 'function-hall-available';
+        } else if (bookedIds.length === allItems.length) {
+          status = 'function-hall-booked-all';
+        } else {
+          status = 'function-hall-booked-partial';
+        }
       }
       
       // Return appropriate field names based on item type
@@ -236,6 +254,15 @@ router.get('/availability/:packageId', async (req, res) => {
         if (bookedIds.length > 0) {
           console.log(`[Availability] ${dateString}: bookedCount=${bookedIds.length}, isBooked=true, bookedCottages=${JSON.stringify(bookedIds)}, availableCottages=${JSON.stringify(availableItems)}`);
         }
+      } else if (itemType === 'function-hall') {
+        dateAvailability[dateString] = {
+          status: status,
+          bookedHalls: bookedIds,
+          availableHalls: availableItems,
+          bookedCount: bookedIds.length,
+          availableCount: availableItems.length,
+          isBooked: bookedIds.length > 0
+        };
       }
 
       // Move to next day
@@ -356,7 +383,21 @@ router.post('/', async (req, res) => {
       contactNumber,
       specialRequests,
       selectedCottages,
-      cottageDates // Array of individual dates for cottage rentals
+      cottageDates, // Array of individual dates for cottage rentals
+      // Function hall fields (dev-friendly; ignored if not provided)
+      hallId,
+      hallName,
+      eventName,
+      eventType,
+      setupType,
+      startTime,
+      endTime,
+      decorationTheme,
+      organization,
+      soundSystemRequired,
+      projectorRequired,
+      cateringRequired,
+      equipmentAddons
     } = req.body;
 
     // Validate required fields
@@ -544,6 +585,23 @@ router.post('/', async (req, res) => {
     }
     
     // 3. Create booking_items for cottages
+    // 4. Create booking_items for function halls (single-day usage)
+    if (hallId) {
+      const hallItem = {
+        booking_id: booking.id,
+        item_type: 'function-hall',
+        item_id: hallId,
+        usage_date: checkIn // event is single-day; checkIn==checkOut
+      };
+      console.log('[Booking] Creating function-hall item:', JSON.stringify(hallItem));
+      const { error: hallErr } = await db
+        .from('booking_items')
+        .insert([hallItem]);
+      if (hallErr) {
+        console.error('[Booking] Error creating function-hall item:', hallErr);
+        throw hallErr;
+      }
+    }
     if (selectedCottages && Array.isArray(selectedCottages) && selectedCottages.length > 0) {
       // If cottageDates is provided, create one booking_item per cottage per date
       // This allows cottages to be rented on specific individual days
