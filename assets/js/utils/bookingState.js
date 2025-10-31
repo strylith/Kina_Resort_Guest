@@ -185,6 +185,64 @@ export const bookingState = {
     }
   },
   
+  // Get available cottages for date range (fetches from database with category filter)
+  async getAvailableCottages(checkin, checkout) {
+    if (!checkin || !checkout) return [];
+    
+    console.log(`[BookingState] Getting available cottages for ${checkin} to ${checkout}`);
+    
+    try {
+      // Call backend API to get real-time availability
+      const { checkAvailability } = await import('./api.js');
+      
+      // Pass editBookingId to exclude current booking from conflicts during re-edit
+      const excludeBookingId = window.bookingFormState?.editBookingId || null;
+      if (excludeBookingId) {
+        console.log(`[BookingState] Excluding booking ${excludeBookingId} from cottage availability check (re-edit mode)`);
+      }
+      
+      // Pass 'cottages' category to only get cottage bookings
+      const result = await checkAvailability(1, checkin, checkout, 'cottages', excludeBookingId);
+      
+      console.log('[BookingState] Cottage availability result:', result);
+      
+      // Prefer server-provided range list (cottages free for ALL dates)
+      if (Array.isArray(result?.rangeAvailableCottages)) {
+        console.log('[BookingState] Using rangeAvailableCottages from server:', result.rangeAvailableCottages);
+        return result.rangeAvailableCottages;
+      }
+      
+      // Fallback: intersect per-day availableCottages across returned dates
+      if (result && result.dateAvailability) {
+        const dateKeys = Object.keys(result.dateAvailability).sort();
+        let intersection = null;
+        dateKeys.forEach(d => {
+          const day = result.dateAvailability[d];
+          const list = Array.isArray(day?.availableCottages) ? day.availableCottages : [];
+          intersection = intersection === null ? list.slice() : intersection.filter(id => list.includes(id));
+        });
+        if (Array.isArray(intersection)) {
+          console.log('[BookingState] Computed intersection availableCottages:', intersection);
+          return intersection;
+        }
+      }
+      
+      // Fallback: return all cottages if no booking data
+      console.log('[BookingState] No booking data found, returning all cottages');
+      return this.allCottages;
+    } catch (error) {
+      console.error('[BookingState] Error fetching available cottages:', error);
+      
+      // Show warning if backend is unavailable
+      if (error.message.includes('backend server') || error.message === 'Failed to fetch') {
+        console.warn('[BookingState] Backend unavailable - showing all cottages as available');
+      }
+      
+      // Fallback to all cottages on error
+      return this.allCottages;
+    }
+  },
+  
   // Get available function halls for a single day (no check-out needed)
   async getAvailableFunctionHalls(visitDate) {
     if (!visitDate) return [];
@@ -272,7 +330,15 @@ export const bookingState = {
       const { checkAvailability } = await import('./api.js');
       // Pass 'cottages' category to only get cottage bookings
       // For cottages, check-in and check-out are the same (single day)
-      const result = await checkAvailability(1, visitDate, visitDate, 'cottages');
+      // Exclude current booking when in re-edit mode so its own cottage items
+      // are not treated as conflicts for availability
+      const excludeBookingId = (typeof window !== 'undefined' && window.bookingFormState?.editMode)
+        ? (window.bookingFormState?.bookingId || null)
+        : null;
+      if (excludeBookingId) {
+        console.log('[BookingState] Excluding current booking from cottage availability:', excludeBookingId);
+      }
+      const result = await checkAvailability(1, visitDate, visitDate, 'cottages', excludeBookingId);
       
       console.log('[BookingState] Cottage availability result:', result);
       

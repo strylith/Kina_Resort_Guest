@@ -10,7 +10,10 @@ let calendarState = {
   selectionStep: 1, // 1 = selecting check-in, 2 = selecting check-out
   modifyingDate: null, // 'checkin', 'checkout', or null for normal flow
   undoStack: [], // Stack to track previous states for undo functionality
-  editBookingId: null // ID of booking being re-edited (excluded from availability checks)
+  editBookingId: null, // ID of booking being re-edited (excluded from availability checks)
+  constraintStartDate: null, // Min date constraint (e.g., room booking check-in)
+  constraintEndDate: null, // Max date constraint (e.g., room booking check-out)
+  selectedCottageDays: [] // Array of individual days selected for cottage rental (multi-day selection)
 };
 
 // Mock data for demonstration - in real app this would come from API
@@ -104,7 +107,8 @@ async function getDateStatus(date, packageId) {
   
   // Check cache first (include category to prevent cache pollution)
   const dateString = formatDateForInput(date);
-  const cacheKey = `${packageId}-${calendarState.packageCategory}-${dateString}`;
+  // Include editBookingId in cache key to avoid mixing re-edit availability
+  const cacheKey = `${packageId}-${calendarState.packageCategory}-${dateString}${calendarState.editBookingId ? `-b${calendarState.editBookingId}` : ''}`;
   
   if (availabilityCache.has(cacheKey)) {
     console.log(`[Calendar] Cache hit for ${dateString} (category: ${calendarState.packageCategory})`);
@@ -131,12 +135,17 @@ async function getDateStatus(date, packageId) {
       checkOut: checkOutStr,
       originalDate: dateString 
     });
-    console.log(`[Calendar] Fetching availability for ${dateString} (package ${packageId}, category: ${calendarState.packageCategory})`);
+    console.log(`[Calendar] 🌐 Fetching availability for ${dateString} (package ${packageId}, category: ${calendarState.packageCategory})`);
     
     // Pass category to get correct bookings
     // Exclude current booking from conflict checks if in re-edit mode
     const excludeBookingId = calendarState.editBookingId || null;
+    if (excludeBookingId) {
+      console.log(`[Calendar] 🔄 Re-edit mode: Excluding booking ${excludeBookingId} from availability checks`);
+    }
     const result = await checkAvailability(packageId, checkInStr, checkOutStr, calendarState.packageCategory, excludeBookingId);
+    
+    console.log(`[Calendar] 📥 API Response for ${dateString}:`, result ? JSON.stringify(result, null, 2) : 'null');
     
     if (result && result.dateAvailability && result.dateAvailability[dateString]) {
       const dateData = result.dateAvailability[dateString];
@@ -165,7 +174,15 @@ async function getDateStatus(date, packageId) {
         const isBooked = dateData.isBooked || false;
         const category = calendarState.packageCategory;
         
-        console.log(`[Calendar] ${dateString}: isBooked=${isBooked}, status=${dateData.status} (category: ${category})`);
+        console.log(`[Calendar] 🏠 ${dateString}: isBooked=${isBooked}, status=${dateData.status} (category: ${category})`);
+        console.log(`[Calendar] 🏠 ${dateString} dateData:`, {
+          availableCottages: dateData.availableCottages,
+          bookedCottages: dateData.bookedCottages,
+          availableItems: dateData.availableItems,
+          bookedItems: dateData.bookedItems,
+          availableCount: dateData.availableCount,
+          bookedCount: dateData.bookedCount
+        });
         
         const status = {
           status: dateData.status || (isBooked ? 'cottage-booked' : 'cottage-available'), // Use backend status
@@ -180,6 +197,8 @@ async function getDateStatus(date, packageId) {
           availableCount: dateData.availableCount,
           bookedCount: dateData.bookedCount
         };
+        
+        console.log(`[Calendar] 🏠 ${dateString} final status:`, status);
         
         availabilityCache.set(cacheKey, status);
         return status;
@@ -285,7 +304,8 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
     totalDates: daysInMonth
   };
   
-  const monthKey = `${packageId}-${year}-${month}`;
+  // Make month cache key aware of category and editBookingId (re-edit mode)
+  const monthKey = `${packageId}-${calendarState.packageCategory}-${year}-${month}${calendarState.editBookingId ? `-b${calendarState.editBookingId}` : ''}`;
   
   // Check if this month is already fully loaded
   let monthAvailability = {};
@@ -315,6 +335,9 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
       // Pass category to filter bookings appropriately
       // Exclude current booking from conflict checks if in re-edit mode
       const excludeBookingId = calendarState.editBookingId || null;
+      if (excludeBookingId) {
+        console.log(`[Calendar] 🔄 Re-edit mode: Month fetch excluding booking ${excludeBookingId} from availability`);
+      }
       const result = await checkAvailability(packageId, startDateStr, endDateStr, calendarState.packageCategory, excludeBookingId);
       perfStats.fetchTime = performance.now() - fetchStart;
       
@@ -328,7 +351,7 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
         // Pre-populate cache with all dates (include category to prevent cache pollution)
         Object.keys(monthAvailability).forEach(dateStr => {
           const dateData = monthAvailability[dateStr];
-          const cacheKey = `${packageId}-${calendarState.packageCategory}-${dateStr}`;
+      const cacheKey = `${packageId}-${calendarState.packageCategory}-${dateStr}${calendarState.editBookingId ? `-b${calendarState.editBookingId}` : ''}`;
           availabilityCache.set(cacheKey, dateData);
         });
         
@@ -451,10 +474,26 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
     const isPast = currentDate < today;
     const isToday = currentDate.toDateString() === today.toDateString();
     
-    // Override status for past dates and today
+    // Check if date is outside constraint range (for cottage selection within room booking dates)
+    let isOutsideConstraints = false;
+    if (calendarState.constraintStartDate || calendarState.constraintEndDate) {
+      if (calendarState.constraintStartDate && dateString < calendarState.constraintStartDate) {
+        isOutsideConstraints = true;
+      }
+      // For cottage selection, exclude checkout date (guests check out on that day)
+      // Use >= instead of > to make checkout date unselectable
+      if (calendarState.constraintEndDate && dateString >= calendarState.constraintEndDate) {
+        isOutsideConstraints = true;
+      }
+    }
+    
+    // Override status for past dates, constrained dates, and today
     let finalStatusType = statusType;
     if (isPast) {
       finalStatusType = 'past';
+    } else if (isOutsideConstraints) {
+      finalStatusType = 'constrained'; // New status for dates outside allowed range
+      additionalClasses += ' constrained';
     } else if (isToday) {
       finalStatusType = 'today';
     }
@@ -503,8 +542,14 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
       }
     }
     
-    // For cottage and function-hall single date selection
-    if (calendarState.packageCategory === 'cottages' || calendarState.packageCategory === 'function-halls') {
+    // For cottage multi-day selection (in room booking mode)
+    if (window.bookingModalCottageMode && calendarState.packageCategory === 'cottages') {
+      if (calendarState.selectedCottageDays.includes(dateString)) {
+        additionalClasses += ' selected-cottage-day';
+      }
+    }
+    // For cottage and function-hall single date selection (normal mode)
+    else if (calendarState.packageCategory === 'cottages' || calendarState.packageCategory === 'function-halls') {
       if (calendarState.selectedCheckin && !calendarState.selectedCheckout) {
         if (dateString === calendarState.selectedCheckin) {
           additionalClasses += ' selected-checkin';
@@ -513,10 +558,12 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
     }
     
     // Check if date is in range using string comparison (more reliable than Date objects)
+    // Skip in-range highlighting for cottage multi-day selection mode
     if (calendarState.selectedCheckin && calendarState.selectedCheckout) {
       // Exclusive checkout: highlight between check-in and the day before checkout
       const isInRange = dateString > calendarState.selectedCheckin && dateString < calendarState.selectedCheckout;
-      if (isInRange) {
+      // Only apply in-range styling for room bookings, not cottage multi-day selection
+      if (isInRange && !(window.bookingModalCottageMode && calendarState.packageCategory === 'cottages')) {
         additionalClasses += ' in-range';
         datesToHighlight.push({ day, dateString, type: 'in-range', additionalClasses: additionalClasses.trim() });
       }
@@ -723,9 +770,28 @@ function initializeCalendarEvents() {
   }
 }
 
+// Toggle a day for cottage multi-day selection
+function toggleCottageDay(dateString) {
+  const index = calendarState.selectedCottageDays.indexOf(dateString);
+  
+  if (index > -1) {
+    // Day already selected, remove it
+    calendarState.selectedCottageDays.splice(index, 1);
+    console.log('[Calendar] Removed cottage day:', dateString);
+  } else {
+    // Add day to selection
+    calendarState.selectedCottageDays.push(dateString);
+    console.log('[Calendar] Added cottage day:', dateString);
+  }
+  
+  console.log('[Calendar] Selected cottage days:', calendarState.selectedCottageDays);
+  updateSelectionVisuals();
+  updateCalendarButtons();
+}
+
 function handleDateClick(dateString, status) {
-  // Don't allow clicking on past dates or maintenance
-  if (status === 'past' || status === 'maintenance') {
+  // Don't allow clicking on past dates, maintenance, or constrained dates
+  if (status === 'past' || status === 'maintenance' || status === 'constrained') {
     return;
   }
   
@@ -736,6 +802,12 @@ function handleDateClick(dateString, status) {
     const bookedRooms = bookedRoomsLabel ? bookedRoomsLabel.textContent : 'some rooms';
     console.warn(`[Calendar] ⚠️ Date ${dateString} has existing bookings (${bookedRooms}). Availability check will validate.`);
     // Don't block - let availability validation handle it during booking submission
+  }
+  
+  // Special handling for cottage multi-day selection in room bookings
+  if (window.bookingModalCottageMode && calendarState.packageCategory === 'cottages') {
+    toggleCottageDay(dateString);
+    return;
   }
   
   // dateString is already in YYYY-MM-DD format from data-date attribute
@@ -869,6 +941,29 @@ function undoLastSelection() {
 
 // Confirm date selection and proceed with booking
 async function confirmDateSelection() {
+  console.log('[confirmDateSelection] 🔍 Debug:', {
+    bookingModalCottageMode: window.bookingModalCottageMode,
+    packageCategory: calendarState.packageCategory,
+    selectedCottageDays: calendarState.selectedCottageDays,
+    selectedCottageDaysLength: calendarState.selectedCottageDays?.length,
+    selectedCheckin: calendarState.selectedCheckin,
+    selectedCheckout: calendarState.selectedCheckout
+  });
+  
+  // Special handling for cottage multi-day selection mode (in room bookings)
+  if (window.bookingModalCottageMode && calendarState.packageCategory === 'cottages') {
+    console.log('[confirmDateSelection] ✅ Entered cottage multi-day mode');
+    if (calendarState.selectedCottageDays.length === 0) {
+      alert('Please select at least one date for cottage rental');
+      return;
+    }
+    console.log('[confirmDateSelection] Confirming cottage multi-day selection:', calendarState.selectedCottageDays);
+    openBookingWithDates();
+    return;
+  }
+  
+  console.log('[confirmDateSelection] ⚠️ Not in cottage multi-day mode, checking standard flow');
+  
   // Safety check - different requirements for single-day vs multi-day bookings
   const isSingleDayBooking = calendarState.packageCategory === 'cottages' || calendarState.packageCategory === 'function-halls';
   
@@ -1201,6 +1296,25 @@ function openBookingWithDates() {
     
     console.log('[Calendar] Opening booking modal with reservationType:', reservationType, 'category:', calendarState.packageCategory);
     
+    // Check if we're adding cottages to a room booking (special mode - multi-day selection)
+    if (window.bookingModalCottageMode && calendarState.packageCategory === 'cottages') {
+      console.log('[Calendar] Cottage multi-day selection for room booking - dates selected:', calendarState.selectedCottageDays);
+      
+      // Store the selected cottage dates for use in the booking modal
+      if (window.updateCottageDatesForRoomBooking && calendarState.selectedCottageDays.length > 0) {
+        // Pass array of selected dates (not a range)
+        window.updateCottageDatesForRoomBooking(calendarState.selectedCottageDays);
+      } else {
+        alert('Please select at least one date for cottage rental');
+        return;
+      }
+      
+      // Clear the cottage mode flag and reset selected days
+      window.bookingModalCottageMode = false;
+      calendarState.selectedCottageDays = [];
+      return;
+    }
+    
     // Room selection bypass ONLY applies to rooms category
     if (calendarState.packageCategory === 'rooms' && reservationType === 'room') {
       if (window.showAvailableRooms) {
@@ -1238,7 +1352,7 @@ window.confirmDateSelection = function() {
 };
 
 // Create and show the calendar modal
-export function openCalendarModal(packageTitle, reservationCount, packageCategory = 'rooms', editBookingId = null) {
+export function openCalendarModal(packageTitle, reservationCount, packageCategory = 'rooms', editBookingId = null, constraintDates = null) {
   // Save booking modal state BEFORE closing (so it doesn't get cleared)
   const savedModalMode = window.bookingModalCalendarMode;
   const savedModalDates = window.bookingModalCurrentDates;
@@ -1261,6 +1375,38 @@ export function openCalendarModal(packageTitle, reservationCount, packageCategor
   calendarState.selectedCheckout = null;
   calendarState.selectionStep = 1;
   calendarState.undoStack = [];
+  calendarState.selectedCottageDays = []; // Reset cottage days
+  
+  // Pre-load cottage dates when opening in cottage mode for re-editing
+  if (window.bookingModalCottageMode && packageCategory === 'cottages' && window.bookingFormState?.cottageDates) {
+    calendarState.selectedCottageDays = [...window.bookingFormState.cottageDates];
+    console.log('[Calendar] 🏠 Pre-loading cottage dates for re-edit:', calendarState.selectedCottageDays);
+    console.log('[Calendar] ✅ Pre-selection loaded successfully - these dates will be highlighted as selected');
+    
+    // Verify the dates are in correct format
+    calendarState.selectedCottageDays.forEach((date, idx) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        console.error(`[Calendar] ❌ Invalid date format at index ${idx}:`, date);
+      }
+    });
+  } else if (window.bookingModalCottageMode && packageCategory === 'cottages') {
+    console.log('[Calendar] ℹ️ Cottage mode active but no existing dates to pre-load');
+    console.log('[Calendar] 🔍 Debug:', {
+      bookingFormState: window.bookingFormState,
+      cottageDates: window.bookingFormState?.cottageDates
+    });
+  }
+  
+  console.log('[Calendar] 🔍 Calendar state after opening:', {
+    selectedCheckin: calendarState.selectedCheckin,
+    selectedCheckout: calendarState.selectedCheckout,
+    selectedCottageDays: calendarState.selectedCottageDays,
+    constraintStartDate: calendarState.constraintStartDate,
+    constraintEndDate: calendarState.constraintEndDate,
+    bookingModalCottageMode: window.bookingModalCottageMode,
+    packageCategory: calendarState.packageCategory,
+    editBookingId: calendarState.editBookingId
+  });
   
   console.log('[Calendar] Opening for category:', packageCategory, 'package:', packageTitle);
   console.log('[Calendar] Booking modal mode:', window.bookingModalCalendarMode);
@@ -1273,11 +1419,27 @@ export function openCalendarModal(packageTitle, reservationCount, packageCategor
     availabilityCache.clear();
     loadedMonths.clear();
   }
+  // Also clear cache when opening in re-edit mode to avoid stale availability
+  if (editBookingId) {
+    console.log('[Calendar] Re-edit detected (excludeBookingId set) - clearing availability cache');
+    availabilityCache.clear();
+    loadedMonths.clear();
+  }
   
   // Initialize calendar state
   calendarState.packageCategory = packageCategory;
   calendarState.editBookingId = editBookingId; // Store booking ID being re-edited
   calendarState.packageTitle = packageTitle;
+  
+  // Set date constraints if provided (for cottage selection within room booking range)
+  if (constraintDates) {
+    calendarState.constraintStartDate = constraintDates.startDate || null;
+    calendarState.constraintEndDate = constraintDates.endDate || null;
+    console.log('[Calendar] Date constraints set:', calendarState.constraintStartDate, 'to', calendarState.constraintEndDate);
+  } else {
+    calendarState.constraintStartDate = null;
+    calendarState.constraintEndDate = null;
+  }
   
   // Check if we're coming from booking modal with existing dates
   if (window.bookingModalCalendarMode && window.bookingModalCurrentDates) {
@@ -1617,22 +1779,32 @@ function updateSelectionVisuals() {
     if (!dateString) return;
     
     // Remove previous selection classes
-    el.classList.remove('selected-checkin', 'selected-checkout', 'in-range');
+    el.classList.remove('selected-checkin', 'selected-checkout', 'in-range', 'selected-cottage-day');
     
-    // Add new selection classes if applicable (calendarState stores YYYY-MM-DD strings)
-    if (calendarState.selectedCheckin && dateString === calendarState.selectedCheckin) {
-      el.classList.add('selected-checkin');
-    }
-    
-    if (calendarState.selectedCheckout && dateString === calendarState.selectedCheckout) {
-      el.classList.add('selected-checkout');
-    }
-    
-    // Add in-range class (compare as strings)
-    if (calendarState.selectedCheckin && calendarState.selectedCheckout) {
-      // Compare as strings to determine if date is in range (exclusive checkout)
-      if (dateString > calendarState.selectedCheckin && dateString < calendarState.selectedCheckout) {
-        el.classList.add('in-range');
+    // Handle cottage multi-day selection mode
+    if (window.bookingModalCottageMode && calendarState.packageCategory === 'cottages') {
+      if (calendarState.selectedCottageDays.includes(dateString)) {
+        el.classList.add('selected-cottage-day');
+      }
+    } else {
+      // Normal mode: Add new selection classes if applicable (calendarState stores YYYY-MM-DD strings)
+      if (calendarState.selectedCheckin && dateString === calendarState.selectedCheckin) {
+        el.classList.add('selected-checkin');
+      }
+      
+      if (calendarState.selectedCheckout && dateString === calendarState.selectedCheckout) {
+        el.classList.add('selected-checkout');
+      }
+      
+      // Add in-range class (compare as strings)
+      if (calendarState.selectedCheckin && calendarState.selectedCheckout) {
+        // Only apply in-range for non-cottage modes
+        if (!(window.bookingModalCottageMode && calendarState.packageCategory === 'cottages')) {
+          // Compare as strings to determine if date is in range (exclusive checkout)
+          if (dateString > calendarState.selectedCheckin && dateString < calendarState.selectedCheckout) {
+            el.classList.add('in-range');
+          }
+        }
       }
     }
   });
@@ -1654,7 +1826,10 @@ function updateCalendarButtons() {
   const isSingleDayBooking = calendarState.packageCategory === 'cottages' || calendarState.packageCategory === 'function-halls';
   const hasSingleDate = isSingleDayBooking && calendarState.selectedCheckin;
   
-  const shouldShow = hasUndoActions || hasBothDates || isModifyingSingleDate || hasSingleDate;
+  // For cottage multi-day selection mode
+  const hasCottageDaysSelected = window.bookingModalCottageMode && calendarState.selectedCottageDays.length > 0;
+  
+  const shouldShow = hasUndoActions || hasBothDates || isModifyingSingleDate || hasSingleDate || hasCottageDaysSelected;
   
   if (shouldShow) {
     // Generate button HTML
@@ -1672,13 +1847,20 @@ function updateCalendarButtons() {
       `;
     }
     
-    if (hasBothDates || isModifyingSingleDate || hasSingleDate) {
+    if (hasBothDates || isModifyingSingleDate || hasSingleDate || hasCottageDaysSelected) {
+      // Determine button text based on mode
+      let buttonText = 'Confirm Selection';
+      if (hasCottageDaysSelected) {
+        const dayCount = calendarState.selectedCottageDays.length;
+        buttonText = `Confirm ${dayCount} Day${dayCount > 1 ? 's' : ''}`;
+      }
+      
       buttonsHTML += `
         <button class="calendar-confirm-btn" onclick="confirmDateSelection()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="20,6 9,17 4,12"/>
           </svg>
-          Confirm Selection
+          ${buttonText}
         </button>
       `;
     }

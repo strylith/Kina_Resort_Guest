@@ -23,7 +23,8 @@ router.get('/availability/:packageId', async (req, res) => {
     const itemType = category === 'cottages' ? 'cottage' :
                      category === 'function-halls' ? 'function-hall' : 'room';
     
-    console.log(`[Availability] Querying booking_items for item_type='${itemType}'`);
+    console.log(`[Availability] 🔍 Querying booking_items for item_type='${itemType}'`);
+    console.log(`[Availability] 🔍 Category: ${category}, ItemType: ${itemType}, PackageId: ${packageId}`);
     
     // Query booking_items with joined booking data
     // This is the single source of truth for all booked items
@@ -33,6 +34,7 @@ router.get('/availability/:packageId', async (req, res) => {
         id,
         item_id,
         item_type,
+        usage_date,
         guest_name,
         adults,
         children,
@@ -46,6 +48,16 @@ router.get('/availability/:packageId', async (req, res) => {
       `)
       .eq('item_type', itemType)
       .eq('bookings.package_id', packageId);
+    
+    console.log(`[Availability] 🔍 Query returned ${bookedItems?.length || 0} booking_items`);
+    if (bookedItems && bookedItems.length > 0) {
+      console.log(`[Availability] 🔍 Sample booking_items:`, JSON.stringify(bookedItems.slice(0, 3), null, 2));
+      const itemsWithUsageDate = bookedItems.filter(item => item.usage_date);
+      console.log(`[Availability] 🔍 Items with usage_date: ${itemsWithUsageDate.length}`);
+      if (itemsWithUsageDate.length > 0) {
+        console.log(`[Availability] 🔍 Sample items with usage_date:`, itemsWithUsageDate.slice(0, 3).map(i => ({ item_id: i.item_id, usage_date: i.usage_date })));
+      }
+    }
     
     // Filter in JavaScript after fetching (Supabase doesn't support complex OR on nested tables)
     // We'll fetch all items and filter client-side
@@ -66,7 +78,20 @@ router.get('/availability/:packageId', async (req, res) => {
         return false;
       }
       
-      // Check date overlap: booking overlaps with requested range
+      // Special handling for cottages with usage_date field
+      if (item.usage_date) {
+        const usageDate = new Date(item.usage_date);
+        usageDate.setHours(0, 0, 0, 0);
+        const rangeStart = new Date(checkIn);
+        rangeStart.setHours(0, 0, 0, 0);
+        const rangeEnd = new Date(checkOut);
+        rangeEnd.setHours(0, 0, 0, 0);
+        
+        // Check if usage_date falls within the requested range
+        return usageDate >= rangeStart && usageDate <= rangeEnd;
+      }
+      
+      // For items without usage_date, check booking date overlap
       const bookingStart = new Date(booking.check_in);
       const bookingEnd = new Date(booking.check_out);
       const rangeStart = new Date(checkIn);
@@ -76,7 +101,15 @@ router.get('/availability/:packageId', async (req, res) => {
       return bookingStart <= rangeEnd && bookingEnd >= rangeStart;
     }) || [];
     
-    console.log(`[Availability] Found ${filteredItems.length} booked items of type '${itemType}' with date overlap`);
+    console.log(`[Availability] ✅ Found ${filteredItems.length} booked items of type '${itemType}' with date overlap`);
+    if (filteredItems.length > 0) {
+      console.log(`[Availability] ✅ Filtered items details:`, filteredItems.map(item => ({
+        item_id: item.item_id,
+        usage_date: item.usage_date,
+        booking_check_in: item.bookings?.check_in,
+        booking_check_out: item.bookings?.check_out
+      })));
+    }
     
     // Use filtered items
     bookedItems.splice(0, bookedItems.length, ...filteredItems);
@@ -104,6 +137,7 @@ router.get('/availability/:packageId', async (req, res) => {
 
     // Detect single-day requests (for cottages/function halls)
     const isSingleDayRequest = checkInDate.getTime() === checkOutDate.getTime();
+    console.log(`[Availability] 🗓️ Date range: ${checkIn} to ${checkOut}, Single day: ${isSingleDayRequest}`);
     
     // Iterate through each day in the range
     // For single-day requests, use <= to include the single day
@@ -223,7 +257,7 @@ router.get('/availability/:packageId', async (req, res) => {
       avgItemAvailability = Math.round(totalItemsAvailable / totalDates);
     }
 
-    res.json({
+    const response = {
       success: true,
       available: overallAvailable,
       avgRoomAvailability: itemType === 'room' ? avgItemAvailability : null,
@@ -232,7 +266,15 @@ router.get('/availability/:packageId', async (req, res) => {
       maintenanceDates: [],
       totalDates: totalDates,
       bookedDatesCount: bookedDatesCount
-    });
+    };
+    
+    console.log(`[Availability] 📤 Sending response with ${Object.keys(dateAvailability).length} dates`);
+    if (itemType === 'cottage') {
+      const datesWithBookings = Object.entries(dateAvailability).filter(([, data]) => data.isBooked);
+      console.log(`[Availability] 📤 Cottage booked dates: ${datesWithBookings.length}`, datesWithBookings.map(([date, data]) => `${date}: ${data.bookedCottages?.join(', ')}`));
+    }
+    
+    res.json(response);
   } catch (error) {
     console.error('Availability check error:', error);
     res.status(500).json({
@@ -313,7 +355,8 @@ router.post('/', async (req, res) => {
       perRoomGuests,
       contactNumber,
       specialRequests,
-      selectedCottages
+      selectedCottages,
+      cottageDates // Array of individual dates for cottage rentals
     } = req.body;
 
     // Validate required fields
@@ -502,24 +545,54 @@ router.post('/', async (req, res) => {
     
     // 3. Create booking_items for cottages
     if (selectedCottages && Array.isArray(selectedCottages) && selectedCottages.length > 0) {
-      const cottageItems = selectedCottages.map(cottageId => ({
-        booking_id: booking.id,
-        item_type: 'cottage',
-        item_id: cottageId
-      }));
-      
-      console.log('[Booking] Creating cottage items:', JSON.stringify(cottageItems, null, 2));
-      
-      const { error: cottagesError } = await db
-        .from('booking_items')
-        .insert(cottageItems);
-      
-      if (cottagesError) {
-        console.error('[Booking] Error creating cottage items:', cottagesError);
-        throw cottagesError;
+      // If cottageDates is provided, create one booking_item per cottage per date
+      // This allows cottages to be rented on specific individual days
+      if (cottageDates && Array.isArray(cottageDates) && cottageDates.length > 0) {
+        const cottageItems = [];
+        selectedCottages.forEach(cottageId => {
+          cottageDates.forEach(date => {
+            cottageItems.push({
+              booking_id: booking.id,
+              item_type: 'cottage',
+              item_id: cottageId,
+              usage_date: date // Store the specific date for this cottage rental
+            });
+          });
+        });
+        
+        console.log('[Booking] Creating cottage items with individual dates:', JSON.stringify(cottageItems, null, 2));
+        
+        const { error: cottagesError } = await db
+          .from('booking_items')
+          .insert(cottageItems);
+        
+        if (cottagesError) {
+          console.error('[Booking] Error creating cottage items:', cottagesError);
+          throw cottagesError;
+        }
+        
+        console.log(`[Booking] Created ${cottageItems.length} cottage items (${selectedCottages.length} cottages × ${cottageDates.length} dates)`);
+      } else {
+        // Fallback: Use main booking check_in/check_out dates
+        const cottageItems = selectedCottages.map(cottageId => ({
+          booking_id: booking.id,
+          item_type: 'cottage',
+          item_id: cottageId
+        }));
+        
+        console.log('[Booking] Creating cottage items:', JSON.stringify(cottageItems, null, 2));
+        
+        const { error: cottagesError } = await db
+          .from('booking_items')
+          .insert(cottageItems);
+        
+        if (cottagesError) {
+          console.error('[Booking] Error creating cottage items:', cottagesError);
+          throw cottagesError;
+        }
+        
+        console.log(`[Booking] Created ${cottageItems.length} cottage items`);
       }
-      
-      console.log(`[Booking] Created ${cottageItems.length} cottage items`);
     }
 
     // Update user's total bookings (mock DB doesn't support RPC, so we'll do it manually)
@@ -645,7 +718,26 @@ router.patch('/:id', async (req, res) => {
   try {
     const userId = req.user.user.id;
     const { id } = req.params;
-    const { status, checkIn, checkOut, guests } = req.body;
+    const { 
+      status, 
+      checkIn, 
+      checkOut, 
+      guests,
+      totalCost,
+      paymentMode,
+      perRoomGuests,
+      contactNumber,
+      specialRequests,
+      selectedCottages,
+      cottageDates
+    } = req.body;
+
+    console.log('[Booking] PATCH request for booking:', id);
+    console.log('[Booking] 🏠 Update request includes:', {
+      selectedCottages: selectedCottages?.length || 0,
+      cottageDates: cottageDates?.length || 0,
+      perRoomGuests: perRoomGuests?.length || 0
+    });
 
     // Verify booking belongs to user
     const { data: existingBooking, error: fetchError } = await db
@@ -671,6 +763,10 @@ router.patch('/:id', async (req, res) => {
     if (checkIn) updateData.check_in = checkIn;
     if (checkOut) updateData.check_out = checkOut;
     if (guests) updateData.guests = guests;
+    if (totalCost !== undefined) updateData.total_cost = totalCost;
+    if (paymentMode) updateData.payment_mode = paymentMode;
+    if (contactNumber) updateData.contact_number = contactNumber;
+    if (specialRequests !== undefined) updateData.special_requests = specialRequests;
 
     // Update booking
     const { data, error } = await db
@@ -682,6 +778,116 @@ router.patch('/:id', async (req, res) => {
 
     if (error) {
       throw error;
+    }
+
+    // Update booking_items if provided
+    
+    // 1. Update room items if perRoomGuests is provided
+    if (perRoomGuests && Array.isArray(perRoomGuests)) {
+      console.log('[Booking] Updating room items:', perRoomGuests.length);
+      
+      // Delete existing room items
+      const { error: deleteRoomsError } = await db
+        .from('booking_items')
+        .delete()
+        .eq('booking_id', id)
+        .eq('item_type', 'room');
+      
+      if (deleteRoomsError) {
+        console.error('[Booking] Error deleting old room items:', deleteRoomsError);
+      }
+      
+      // Create new room items
+      if (perRoomGuests.length > 0) {
+        const roomItems = perRoomGuests.map(room => ({
+          booking_id: id,
+          item_type: 'room',
+          item_id: room.roomId,
+          guest_name: room.guestName,
+          adults: room.adults,
+          children: room.children
+        }));
+        
+        const { error: roomsError } = await db
+          .from('booking_items')
+          .insert(roomItems);
+        
+        if (roomsError) {
+          console.error('[Booking] Error creating room items:', roomsError);
+          throw roomsError;
+        }
+        
+        console.log(`[Booking] Updated ${roomItems.length} room items`);
+      }
+    }
+    
+    // 2. Update cottage items if selectedCottages is provided
+    if (selectedCottages !== undefined) {
+      console.log('[Booking] 🏠 Updating cottage items:', { selectedCottages, cottageDates });
+      
+      // Delete existing cottage items
+      const { error: deleteCottagesError } = await db
+        .from('booking_items')
+        .delete()
+        .eq('booking_id', id)
+        .eq('item_type', 'cottage');
+      
+      if (deleteCottagesError) {
+        console.error('[Booking] Error deleting old cottage items:', deleteCottagesError);
+      }
+      
+      // Create new cottage items
+      if (Array.isArray(selectedCottages) && selectedCottages.length > 0) {
+        // If cottageDates is provided, create one booking_item per cottage per date
+        if (cottageDates && Array.isArray(cottageDates) && cottageDates.length > 0) {
+          const cottageItems = [];
+          selectedCottages.forEach(cottageId => {
+            cottageDates.forEach(date => {
+              cottageItems.push({
+                booking_id: id,
+                item_type: 'cottage',
+                item_id: cottageId,
+                usage_date: date
+              });
+            });
+          });
+          
+          console.log('[Booking] 🏠 Creating cottage items with individual dates:', JSON.stringify(cottageItems, null, 2));
+          
+          const { error: cottagesError } = await db
+            .from('booking_items')
+            .insert(cottageItems);
+          
+          if (cottagesError) {
+            console.error('[Booking] Error creating cottage items:', cottagesError);
+            throw cottagesError;
+          }
+          
+          console.log(`[Booking] 🏠 Updated ${cottageItems.length} cottage items (${selectedCottages.length} cottages × ${cottageDates.length} dates)`);
+        } else {
+          // Fallback: Create cottage items without specific dates
+          const cottageItems = selectedCottages.map(cottageId => ({
+            booking_id: id,
+            item_type: 'cottage',
+            item_id: cottageId
+          }));
+          
+          console.log('[Booking] Creating cottage items without dates:', JSON.stringify(cottageItems, null, 2));
+          
+          const { error: cottagesError } = await db
+            .from('booking_items')
+            .insert(cottageItems);
+          
+          if (cottagesError) {
+            console.error('[Booking] Error creating cottage items:', cottagesError);
+            throw cottagesError;
+          }
+          
+          console.log(`[Booking] Updated ${cottageItems.length} cottage items`);
+        }
+      } else {
+        console.log('[Booking] 🏠 No cottages in update, all cottage items deleted');
+      }
     }
 
     res.json({

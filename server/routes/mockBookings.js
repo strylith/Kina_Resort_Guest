@@ -67,7 +67,8 @@ router.post('/bookings', async (req, res) => {
       contactNumber,
       specialRequests,
       selectedCottages,
-      selectedHall
+      selectedHall,
+      cottageDates  // Array of dates for cottage rentals
     } = req.body;
 
     console.log('[MockBookings] Creating booking:', { packageId, checkIn, checkOut });
@@ -126,16 +127,45 @@ router.post('/bookings', async (req, res) => {
     }
 
     // Create booking items for cottages
+    // For cottages added to room bookings, create an item for each cottage on each selected date
     if (selectedCottages && selectedCottages.length > 0) {
-      selectedCottages.forEach((cottageId, index) => {
-        const itemId = `${bookingId}-cottage-${index}`;
-        mockClient.tables.booking_items.set(itemId, {
-          id: itemId,
-          booking_id: bookingId,
-          item_type: 'cottage',
-          item_id: cottageId
+      console.log('[MockBookings] 🏠 Creating cottage items:', { selectedCottages, cottageDates });
+      
+      if (cottageDates && cottageDates.length > 0) {
+        // Cottage rental with specific dates - create item for each cottage on each date
+        let itemCounter = 0;
+        selectedCottages.forEach(cottageId => {
+          cottageDates.forEach(date => {
+            const itemId = `${bookingId}-cottage-${itemCounter++}`;
+            console.log('[MockBookings] 🏠 Creating cottage item:', { itemId, cottageId, usage_date: date });
+            mockClient.tables.booking_items.set(itemId, {
+              id: itemId,
+              booking_id: bookingId,
+              item_type: 'cottage',
+              item_id: cottageId,
+              usage_date: date,  // Store the specific date for this cottage rental
+              guest_name: guests?.adults ? `${guests.adults} adults, ${guests.children || 0} children` : null,
+              adults: guests?.adults || 0,
+              children: guests?.children || 0
+            });
+          });
         });
-      });
+      } else {
+        // Regular cottage booking (full date range) - create one item per cottage
+        selectedCottages.forEach((cottageId, index) => {
+          const itemId = `${bookingId}-cottage-${index}`;
+          console.log('[MockBookings] 🏠 Creating cottage item (date range):', { itemId, cottageId });
+          mockClient.tables.booking_items.set(itemId, {
+            id: itemId,
+            booking_id: bookingId,
+            item_type: 'cottage',
+            item_id: cottageId,
+            guest_name: guests?.adults ? `${guests.adults} adults, ${guests.children || 0} children` : null,
+            adults: guests?.adults || 0,
+            children: guests?.children || 0
+          });
+        });
+      }
     }
 
     // Create booking items for function halls
@@ -263,21 +293,49 @@ router.patch('/bookings/:id', async (req, res) => {
     
     // Update cottages if provided
     if (updates.selectedCottages) {
+      console.log('[MockBookings] 🏠 Updating cottage items:', { selectedCottages: updates.selectedCottages, cottageDates: updates.cottageDates });
+      
       // Remove old cottage items
       Array.from(mockClient.tables.booking_items.values())
         .filter(item => item.booking_id === id && item.item_type === 'cottage')
         .forEach(item => mockClient.tables.booking_items.delete(item.id));
       
       // Add new cottage items
-      updates.selectedCottages.forEach((cottageId, index) => {
-        const itemId = `${id}-cottage-${index}`;
-        mockClient.tables.booking_items.set(itemId, {
-          id: itemId,
-          booking_id: id,
-          item_type: 'cottage',
-          item_id: cottageId
+      if (updates.cottageDates && updates.cottageDates.length > 0) {
+        // Cottage rental with specific dates - create item for each cottage on each date
+        let itemCounter = 0;
+        updates.selectedCottages.forEach(cottageId => {
+          updates.cottageDates.forEach(date => {
+            const itemId = `${id}-cottage-${itemCounter++}`;
+            console.log('[MockBookings] 🏠 Creating cottage item (update):', { itemId, cottageId, usage_date: date });
+            mockClient.tables.booking_items.set(itemId, {
+              id: itemId,
+              booking_id: id,
+              item_type: 'cottage',
+              item_id: cottageId,
+              usage_date: date,  // Store the specific date for this cottage rental
+              guest_name: updates.guests?.adults ? `${updates.guests.adults} adults, ${updates.guests.children || 0} children` : null,
+              adults: updates.guests?.adults || 0,
+              children: updates.guests?.children || 0
+            });
+          });
         });
-      });
+      } else {
+        // Regular cottage booking (full date range) - create one item per cottage
+        updates.selectedCottages.forEach((cottageId, index) => {
+          const itemId = `${id}-cottage-${index}`;
+          console.log('[MockBookings] 🏠 Creating cottage item (update, date range):', { itemId, cottageId });
+          mockClient.tables.booking_items.set(itemId, {
+            id: itemId,
+            booking_id: id,
+            item_type: 'cottage',
+            item_id: cottageId,
+            guest_name: updates.guests?.adults ? `${updates.guests.adults} adults, ${updates.guests.children || 0} children` : null,
+            adults: updates.guests?.adults || 0,
+            children: updates.guests?.children || 0
+          });
+        });
+      }
     }
     
     // Update function halls if provided
@@ -484,39 +542,10 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       if (booking.package_id != packageId) return false;
       if (!['pending', 'confirmed'].includes(booking.status)) return false;
       
-      // Filter by category if specified - normalize both sides for comparison
-      if (category) {
-        // Try booking.category first, then fallback to inferring from booking_items or default to 'rooms'
-        let bookingCategory = booking.category;
-        
-        // If booking doesn't have category field, try to infer from booking_items
-        if (!bookingCategory) {
-          const bookingItems = Array.from(mockClient.tables.booking_items.values())
-            .filter(item => item.booking_id === booking.id);
-          
-          if (bookingItems.length > 0) {
-            const itemTypes = bookingItems.map(item => item.item_type).filter((type, idx, arr) => arr.indexOf(type) === idx);
-            // Infer category from item_type (prioritize non-room types)
-            if (itemTypes.includes('function-hall')) {
-              bookingCategory = 'function-halls';
-            } else if (itemTypes.includes('cottage')) {
-              bookingCategory = 'cottages';
-            } else {
-              bookingCategory = 'rooms'; // Default (or if only rooms found)
-            }
-          } else {
-            bookingCategory = 'rooms'; // No items found, default to rooms
-          }
-          console.log(`[MockAvailability] Inferred category '${bookingCategory}' from booking_items for booking ${booking.id}`);
-        }
-        
-        // Normalize both categories before comparison
-        const normalizedBookingCategory = normalizeCategory(bookingCategory);
-        
-        if (normalizedBookingCategory !== requestedCategory) {
-          return false; // Skip bookings that don't match the requested category
-        }
-      }
+      // Don't filter bookings by category here!
+      // Instead, we'll filter booking_items by item_type later.
+      // This ensures that cottage items from room bookings are included
+      // when checking cottage availability.
       
       // Exclude the booking being re-edited from conflict checks
       if (excludeBookingId && booking.id == excludeBookingId) {
@@ -535,16 +564,9 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       return bookingStart <= checkOutDateStr && bookingEnd >= checkInDateStr;
     });
     
-    console.log(`[MockAvailability] Filtered to ${relevantBookings.length} bookings for category '${requestedCategory}' (from ${allBookings.length} total)`);
-    if (category) {
-      // Show counts by normalized category
-      const bookingsByCategory = allBookings.filter(b => {
-        const bookingCat = normalizeCategory(b.category);
-        return bookingCat === requestedCategory;
-      }).length;
-      console.log(`[MockAvailability] Total bookings matching normalized category '${requestedCategory}': ${bookingsByCategory}`);
-      console.log(`[MockAvailability] Processing itemType: '${itemType}' for category: '${requestedCategory}'`);
-    }
+    console.log(`[MockAvailability] 📦 Filtered to ${relevantBookings.length} bookings with date overlap (from ${allBookings.length} total)`);
+    console.log(`[MockAvailability] 🔍 Will filter booking_items by item_type='${itemType}' for category: '${requestedCategory}'`);
+    console.log(`[MockAvailability] 💡 Note: Including ALL bookings (rooms, cottages, etc.) to find items of requested type`);
     
     // Get booking items for these bookings
     const bookedItems = [];
@@ -553,6 +575,12 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         .filter(item => item.booking_id === booking.id && item.item_type === itemType);
       
       items.forEach(item => {
+        // Double-check: skip items from excluded booking (safety check)
+        if (excludeBookingId && item.booking_id == excludeBookingId) {
+          console.log(`[MockAvailability] 🚫 Skipping item ${item.item_id} from excluded booking ${excludeBookingId}`);
+          return;
+        }
+        
         bookedItems.push({
           ...item,
           booking: booking
@@ -560,7 +588,24 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       });
     });
     
-    console.log(`[MockAvailability] Found ${bookedItems.length} booked items of type '${itemType}' for category '${category || 'all'}'`);
+    if (excludeBookingId) {
+      console.log(`[MockAvailability] ✅ After exclusion, bookedItems count: ${bookedItems.length}`);
+    }
+    
+    console.log(`[MockAvailability] 🔍 Found ${bookedItems.length} booked items of type '${itemType}' for category '${category || 'all'}'`);
+    if (bookedItems.length > 0) {
+      console.log(`[MockAvailability] 🔍 Sample booked items:`, bookedItems.slice(0, 3).map(item => ({
+        item_id: item.item_id,
+        item_type: item.item_type,
+        usage_date: item.usage_date,
+        booking_id: item.booking_id
+      })));
+      const itemsWithUsageDate = bookedItems.filter(item => item.usage_date);
+      console.log(`[MockAvailability] 🔍 Items with usage_date: ${itemsWithUsageDate.length}/${bookedItems.length}`);
+      if (itemsWithUsageDate.length > 0) {
+        console.log(`[MockAvailability] 🔍 Usage dates found:`, itemsWithUsageDate.map(i => ({ item_id: i.item_id, usage_date: i.usage_date })));
+      }
+    }
     try {
       const typeSample = Array.from(new Set(bookedItems.map(b => b.item_type))).join(', ');
       console.log('[MockAvailability] Item types seen in bookedItems:', typeSample || 'none');
@@ -642,6 +687,15 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       bookedItems.forEach(item => {
         // Defensive guard against undefined items or item_ids
         if (!item || !item.item_id) return;
+        
+        // Special handling for cottages with usage_date field
+        if (item.usage_date) {
+          const usageDateStr = normalizeDateString(item.usage_date);
+          if (usageDateStr === dateString) {
+            bookedIds.push(String(item.item_id).trim());
+          }
+          return;
+        }
         
         const booking = item.booking;
         // Normalize booking dates to YYYY-MM-DD strings

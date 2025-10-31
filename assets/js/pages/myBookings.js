@@ -154,11 +154,19 @@ export async function MyBookingsPage() {
       const guestEmail = booking.guest_email || booking.guests?.email || authState.user?.email || '';
       const guestContact = booking.contact_number || booking.contact || '';
       
+      // Extract cottage dates if available
+      const cottageDates = cottages
+        .map(c => c.usage_date)
+        .filter(date => date) // Remove null/undefined dates
+        .filter((date, index, self) => self.indexOf(date) === index) // Remove duplicates
+        .sort(); // Sort chronologically
+      
       const preFillData = {
         checkIn: booking.check_in,
         checkOut: booking.check_out,
         selectedRooms: rooms.map(r => r.item_id),
         selectedCottages: cottages.map(c => c.item_id),
+        cottageDates: cottageDates, // Include cottage rental dates
         guestInfo: {
           name: guestName,
           email: guestEmail,
@@ -269,11 +277,32 @@ export async function MyBookingsPage() {
     // Build cottage details
     let cottageDetails = '';
     if (cottages.length > 0) {
+      // Group cottages by item_id and collect their usage dates
+      const cottageGroups = {};
+      cottages.forEach(cottage => {
+        if (!cottageGroups[cottage.item_id]) {
+          cottageGroups[cottage.item_id] = [];
+        }
+        if (cottage.usage_date) {
+          cottageGroups[cottage.item_id].push(cottage.usage_date);
+        }
+      });
+      
       cottageDetails = `
         <div class="detail-section">
           <strong>Selected Cottages:</strong>
           <ul class="cottage-details-list">
-            ${cottages.map(cottage => `<li><strong>${cottage.item_id}</strong></li>`).join('')}
+            ${Object.entries(cottageGroups).map(([cottageId, dates]) => {
+              let dateInfo = '';
+              if (dates.length > 0) {
+                const formattedDates = dates.map(date => {
+                  const d = new Date(date + 'T00:00:00');
+                  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }).join(', ');
+                dateInfo = `<br><small style="color: #1e40af;">Rental dates: ${formattedDates} (${dates.length} ${dates.length === 1 ? 'day' : 'days'})</small>`;
+              }
+              return `<li><strong>${cottageId}</strong>${dateInfo}</li>`;
+            }).join('')}
           </ul>
         </div>
       `;
@@ -383,17 +412,29 @@ export async function MyBookingsPage() {
         guestsDisplay = booking.guests || 'N/A';
       }
       
-      // Count items from booking_items array
+      // Extract actual item names from booking_items array
       const bookingItems = booking.booking_items || [];
-      const roomCount = bookingItems.filter(item => item.item_type === 'room').length;
-      const cottageCount = bookingItems.filter(item => item.item_type === 'cottage').length;
-      const hallCount = bookingItems.filter(item => item.item_type === 'function-hall').length;
+      const rooms = bookingItems.filter(item => item.item_type === 'room');
+      const cottages = bookingItems.filter(item => item.item_type === 'cottage');
+      const halls = bookingItems.filter(item => item.item_type === 'function-hall');
       
-      const itemsDisplay = [
-        roomCount > 0 ? `${roomCount} room${roomCount > 1 ? 's' : ''}` : '',
-        cottageCount > 0 ? `${cottageCount} cottage${cottageCount > 1 ? 's' : ''}` : '',
-        hallCount > 0 ? `${hallCount} hall${hallCount > 1 ? 's' : ''}` : ''
-      ].filter(Boolean).join(' + ') || 'N/A';
+      // Get unique room and cottage names
+      const uniqueRooms = [...new Set(rooms.map(r => r.item_id))];
+      const uniqueCottages = [...new Set(cottages.map(c => c.item_id))];
+      const uniqueHalls = [...new Set(halls.map(h => h.item_id))];
+      
+      const itemsParts = [];
+      if (uniqueRooms.length > 0) {
+        itemsParts.push(uniqueRooms.length > 2 ? `${uniqueRooms.length} rooms` : uniqueRooms.join(', '));
+      }
+      if (uniqueCottages.length > 0) {
+        itemsParts.push(uniqueCottages.length > 2 ? `${uniqueCottages.length} cottages` : uniqueCottages.join(', '));
+      }
+      if (uniqueHalls.length > 0) {
+        itemsParts.push(uniqueHalls.join(', '));
+      }
+      
+      const itemsDisplay = itemsParts.join(' + ') || 'N/A';
       
       // Derive category for display tweaks
       const category = booking.category || booking.packages?.category || '';

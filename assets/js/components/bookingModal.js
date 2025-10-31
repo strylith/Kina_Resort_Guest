@@ -14,7 +14,8 @@ let bookingFormState = {
   savedFormData: {},
   returningFromCottage: false, // Track if we're returning from cottage selection
   editMode: false, // Track if we're editing an existing booking
-  bookingId: null // ID of booking being edited
+  bookingId: null, // ID of booking being edited
+  cottageDates: [] // Array of individual dates selected for cottage rental
 };
 
 // Reset all transient booking modal state and selections
@@ -39,6 +40,9 @@ function resetBookingModalState() {
     bookingFormState.guestInfo = {};
     bookingFormState.paymentMode = null;
     bookingFormState.perRoomGuests = [];
+    bookingFormState.pendingRoomsSelection = null;
+    bookingFormState.pendingCottagesSelection = null;
+    bookingFormState.cottageDates = [];
   } catch (_) {}
   
   // DO NOT clear bookingState.selectedCottages or bookingState.selectedRooms
@@ -187,6 +191,12 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
   bookingFormState.formData = {};
   bookingFormState.errors = {};
   
+  // If editing and has cottages, set flag to show cottage section
+  if (editMode && preFillData?.selectedCottages && preFillData.selectedCottages.length > 0 && initialType === 'room') {
+    bookingFormState.addCottageToRoom = true;
+    console.log('[BookingModal] Edit mode with cottages detected, setting addCottageToRoom=true');
+  }
+  
   // Handle pre-fill data (dates, selected rooms/cottages, etc.)
   if (preFillData) {
     if (editMode) {
@@ -199,13 +209,22 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
       };
       bookingFormState.selectedRoomsFromFlow = preFillData.selectedRooms || [];
       bookingFormState.selectedCottagesFromFlow = preFillData.selectedCottages || [];
+      bookingFormState.cottageDates = preFillData.cottageDates || []; // Load cottage rental dates
       bookingFormState.guestInfo = preFillData.guestInfo || {};
       bookingFormState.paymentMode = preFillData.paymentMode;
       bookingFormState.perRoomGuests = preFillData.perRoomGuests || [];
+      
+      // Set bookingState.selectedCottages for display in edit mode (ensure unique)
+      if (preFillData.selectedCottages && preFillData.selectedCottages.length > 0) {
+        bookingState.selectedCottages = Array.from(new Set(preFillData.selectedCottages));
+        console.log('[BookingModal] Set bookingState.selectedCottages for edit mode (deduped):', bookingState.selectedCottages);
+      }
+      
       console.log('[BookingModal] Pre-fill data loaded:', {
         dates: bookingFormState.preFillDates,
         rooms: bookingFormState.selectedRoomsFromFlow,
         cottages: bookingFormState.selectedCottagesFromFlow,
+        cottageDates: bookingFormState.cottageDates,
         guestInfo: bookingFormState.guestInfo,
         paymentMode: bookingFormState.paymentMode,
         perRoomGuests: bookingFormState.perRoomGuests?.length || 0
@@ -482,10 +501,34 @@ function renderRoomFields() {
         </div>
       </div>
       
-      ${generateSelectedRoomsDisplay()}
+      <div class="add-option-section">
+        <button type="button" class="add-option-toggle" id="add-more-rooms-toggle" onclick="toggleAddMoreRooms()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add More Rooms
+        </button>
+        
+        <div class="form-field" id="rooms-selection-field" style="display: none;" onclick="event.stopPropagation();">
+          <label class="form-label">Available Rooms</label>
+          <div class="room-selection-grid" id="inline-rooms-grid" style="grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 12px;">
+            <!-- Rooms will be populated here -->
+          </div>
+          <div id="rooms-confirm-section" style="margin-top: 16px; display: none; text-align: right;">
+            <button type="button" class="btn" onclick="event.stopPropagation(); cancelRoomsSelection()" style="margin-right: 8px;">Cancel</button>
+            <button type="button" class="btn primary" onclick="event.stopPropagation(); confirmRoomsSelection()">Confirm Selection</button>
+          </div>
+          <div id="rooms-close-section" style="margin-top: 16px; display: none; text-align: right;">
+            <button type="button" class="btn" onclick="event.stopPropagation(); closeRoomsSelection()">Close</button>
+          </div>
+        </div>
+        
+        ${generateSelectedRoomsOnlyDisplay()}
+      </div>
       
       <div class="add-option-section">
-        <button type="button" class="add-option-toggle" onclick="showCottageSelection()">
+        <button type="button" class="add-option-toggle" id="add-cottage-toggle" onclick="toggleAddCottage()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -493,17 +536,29 @@ function renderRoomFields() {
           Add Cottage to Room Booking
         </button>
         
-        <div class="form-field" id="cottage-selection-field" style="display: none;">
-          <label class="form-label">Cottage Selection</label>
-          <div class="checkbox-group">
-            ${cottageTypes.map(cottage => `
-              <label class="checkbox-item">
-                <input type="checkbox" name="selectedCottages" value="${cottage}">
-                <span class="checkbox-label">${cottage}</span>
-              </label>
-            `).join('')}
+        <div class="form-field" id="cottage-selection-field" style="display: none;" onclick="event.stopPropagation();">
+          <label class="form-label">Available Cottages</label>
+          <div id="cottage-dates-display" style="background: #f0f9ff; padding: 12px; border-radius: 8px; margin: 12px 0; display: none; flex-direction: row; align-items: center;">
+            <div style="flex: 1;">
+              <strong style="color: #1e40af;">Selected Dates:</strong>
+              <span id="cottage-dates-text" style="color: #1e40af; margin-left: 8px;"></span>
+            </div>
+            <button type="button" class="btn btn-sm" onclick="event.stopPropagation(); changeCottageDates()" style="margin-left: 12px; padding: 6px 12px; font-size: 13px;">
+              Change Dates
+            </button>
+          </div>          <div class="room-selection-grid" id="inline-cottage-grid" style="grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 12px;">
+            <!-- Cottages will be populated here -->
+          </div>
+          <div id="cottages-confirm-section" style="margin-top: 16px; display: none; text-align: right;">
+            <button type="button" class="btn" onclick="event.stopPropagation(); cancelCottagesSelection()" style="margin-right: 8px;">Cancel</button>
+            <button type="button" class="btn primary" onclick="event.stopPropagation(); confirmCottagesSelection()">Confirm Selection</button>
+          </div>
+          <div id="cottages-close-section" style="margin-top: 16px; display: none; text-align: right;">
+            <button type="button" class="btn" onclick="event.stopPropagation(); closeCottagesSelection()">Close</button>
           </div>
         </div>
+        
+        ${generateSelectedCottagesOnlyDisplay()}
       </div>
     </div>
     
@@ -803,16 +858,15 @@ function generatePerRoomGuestInputs() {
   return html;
 }
 
-// Generate selected rooms and cottages display (for room bookings)
-function generateSelectedRoomsDisplay() {
+// Generate selected rooms only display (for room bookings - shown below Add More Rooms)
+function generateSelectedRoomsOnlyDisplay() {
   const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
-  const selectedCottages = bookingState.selectedCottages || [];
   
-  let html = '<div class="form-section"><h3>Selected Accommodations</h3><div class="selected-items-grid">';
-  
-  if (selectedRooms.length === 0 && selectedCottages.length === 0) {
-    html += '<div class="empty-selected" style="color: var(--color-muted);">No items selected yet.</div>';
+  if (selectedRooms.length === 0) {
+    return '';
   }
+  
+  let html = '<div style="margin-top: 16px;"><h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">Selected Rooms</h4><div class="selected-items-grid">';
   
   // Add room cards
   selectedRooms.forEach(roomId => {
@@ -823,10 +877,34 @@ function generateSelectedRoomsDisplay() {
           <strong>${roomId}</strong>
           <span>Standard Room</span>
         </div>
-        <button type="button" class="btn small" data-remove-room="${roomId}" onclick="removeSelectedRoom('${roomId}')">Remove</button>
       </div>
     `;
   });
+  
+  html += '</div></div>';
+  return html;
+}
+
+// Generate selected cottages only display (for room bookings - shown below Add Cottage)
+function generateSelectedCottagesOnlyDisplay() {
+  const selectedCottages = bookingState.selectedCottages || [];
+  
+  if (selectedCottages.length === 0) {
+    return '';
+  }
+  
+  let html = '<div style="margin-top: 16px;"><h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">Selected Cottages</h4>';
+  
+  // Show cottage dates if available
+  if (bookingFormState.cottageDates && bookingFormState.cottageDates.length > 0) {
+    const formattedDates = bookingFormState.cottageDates.map(date => {
+      const d = new Date(date + 'T00:00:00');
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }).join(', ');
+    html += `<p style="margin: 0 0 12px 0; color: #1e40af; font-size: 13px;">Rental dates: ${formattedDates} (${bookingFormState.cottageDates.length} ${bookingFormState.cottageDates.length === 1 ? 'day' : 'days'})</p>`;
+  }
+  
+  html += '<div class="selected-items-grid">';
   
   // Add cottage cards
   selectedCottages.forEach(cottageId => {
@@ -837,13 +915,11 @@ function generateSelectedRoomsDisplay() {
           <strong>${cottageId}</strong>
           <span>Cottage</span>
         </div>
-        <button type="button" class="btn small" data-remove-cottage="${cottageId}" onclick="removeSelectedCottage('${cottageId}')">Remove</button>
       </div>
     `;
   });
   
-  // Manage button
-  html += '</div><div style="margin-top:12px;"><button type="button" class="btn" onclick="openItemsManager()">Add/Remove Items</button></div></div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -866,13 +942,11 @@ function generateSelectedCottagesDisplay() {
           <strong>${cottageId}</strong>
           <span>Cottage</span>
         </div>
-        <button type="button" class="btn small" data-remove-cottage="${cottageId}" onclick="removeCottageFromBooking('${cottageId}')">Remove</button>
       </div>
     `;
   });
   
-  // Manage button to add more cottages
-  html += '</div><div style="margin-top:12px;"><button type="button" class="btn" onclick="openCottageItemsManager()">Add/Remove Cottages</button></div></div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -1046,22 +1120,22 @@ window.openCottageItemsManager = async function() {
       <div class="form-section" id="cottage-items-manager" style="border:1px solid var(--border); border-radius:8px; padding:12px; background:#fafafa;">
         <h3>Add/Remove Cottages</h3>
         <div id="cottage-items-manager-grid">Loading...</div>
+        <div style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 12px;">
+          <button type="button" class="btn" onclick="closeCottageItemsManager()">Cancel</button>
+          <button type="button" class="btn primary" onclick="confirmCottageItemsManager()">Confirm</button>
+        </div>
       </div>
     `;
     container.appendChild(panel);
   }
   // Render available cottages
   await renderCottageItemsManagerGrid();
-  // outside click closes
+  // outside click closes (but don't update form on outside click, only on confirm)
   function handleOutside(e){
     const box = document.getElementById('cottage-items-manager');
-    if (box && !box.contains(e.target)) {
-      // Update the form display when closing
-      const formContent = document.querySelector('.booking-form-content');
-      if (formContent) {
-        formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
-        initializeForm();
-      }
+    const cancelBtn = e.target.closest('.btn');
+    const confirmBtn = e.target.closest('.btn.primary');
+    if (box && !box.contains(e.target) && !cancelBtn && !confirmBtn) {
       panel.remove();
       document.removeEventListener('click', handleOutside, true);
     }
@@ -1124,15 +1198,48 @@ window.toggleCottageInManager = function(cottageId) {
   renderCottageItemsManagerGrid();
 };
 
-// Inline grid toggle for cottages
+// Close cottage items manager without saving
+window.closeCottageItemsManager = function() {
+  const panel = document.getElementById('cottage-items-manager-panel');
+  if (panel) {
+    panel.remove();
+  }
+};
+
+// Confirm and close cottage items manager
+window.confirmCottageItemsManager = function() {
+  // Update the form display when confirming
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+  // Remove the panel
+  const panel = document.getElementById('cottage-items-manager-panel');
+  if (panel) {
+    panel.remove();
+  }
+};
+
+// Inline grid toggle for cottages (for cottage-only bookings, use pending version for room bookings)
 window.toggleInlineCottage = function(cottageId) {
+  // Check if this is a room booking with inline cottage grid
+  const grid = document.getElementById('inline-cottage-grid');
+  const cottageField = document.getElementById('cottage-selection-field');
+  
+  // If this is in the room booking inline grid, use pending selection
+  if (grid && cottageField && cottageField.style.display !== 'none' && bookingFormState.reservationType === 'room') {
+    togglePendingCottage(cottageId);
+    return;
+  }
+  
+  // Otherwise, use immediate selection (for cottage-only bookings)
   if ((bookingState.selectedCottages||[]).includes(cottageId)) {
     bookingState.removeCottage(cottageId);
   } else {
     bookingState.addCottage(cottageId);
   }
   // Re-render inline grid to reflect new state
-  const grid = document.getElementById('inline-cottage-grid');
   if (grid) {
     // Trigger full form re-render to keep totals/costs in sync
     const formContent = document.querySelector('.booking-form-content');
@@ -1566,8 +1673,530 @@ function showBookingForm() {
 }
 
 // Make functions globally available
-window.toggleAddCottage = showCottageSelection;
 window.showCottageSelection = showCottageSelection;
+
+// Toggle add more rooms section
+window.toggleAddMoreRooms = function() {
+  const field = document.getElementById('rooms-selection-field');
+  const button = document.getElementById('add-more-rooms-toggle');
+  
+  if (!field || !button) return;
+  
+  const isVisible = field.style.display !== 'none';
+  
+  if (isVisible) {
+    field.style.display = 'none';
+    // Reset pending selection when closing
+    bookingFormState.pendingRoomsSelection = null;
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Add More Rooms
+    `;
+  } else {
+    field.style.display = 'block';
+    // Reset pending selection when opening
+    bookingFormState.pendingRoomsSelection = null;
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Hide Rooms
+    `;
+    // Populate rooms grid if not already populated
+    populateInlineRoomsGrid();
+  }
+};
+
+// Toggle add cottage section - Opens calendar with room booking date constraints
+window.toggleAddCottage = function() {
+  const field = document.getElementById('cottage-selection-field');
+  const button = document.getElementById('add-cottage-toggle');
+  
+  if (!field || !button) return;
+  
+  const dates = bookingFormState.preFillDates || {};
+  const checkin = dates.checkin;
+  const checkout = dates.checkout;
+  
+  if (field.style.display === 'none' || !field.style.display) {
+    // EXPANDING - check if we have dates first
+    if (!checkin || !checkout) {
+      alert('Please select check-in and check-out dates first for your room booking');
+      return;
+    }
+    
+    // If no cottage dates selected yet, open calendar to select dates
+    if (!bookingFormState.cottageDates || bookingFormState.cottageDates.length === 0) {
+      console.log('[toggleAddCottage] No cottage dates yet, opening calendar');
+      window.changeCottageDates();
+      return;
+    }
+    
+    // Show section
+    field.style.display = 'block';
+    bookingFormState.addCottageToRoom = true;
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Hide Cottages
+    `;
+    
+    // Show dates display
+    const datesDisplay = document.getElementById('cottage-dates-display');
+    if (datesDisplay) {
+      datesDisplay.style.display = 'block';
+    }
+    
+    // Populate grid with available cottages for selected dates
+    populateInlineCottageGrid();
+    
+  } else {
+    // COLLAPSING
+    field.style.display = 'none';
+    bookingFormState.addCottageToRoom = false;
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Add Cottage to Room Booking
+    `;
+  }
+};
+
+// New function to change/select cottage dates
+window.changeCottageDates = function() {
+  const dates = bookingFormState.preFillDates || {};
+  const checkin = dates.checkin;
+  const checkout = dates.checkout;
+  
+  if (!checkin || !checkout) {
+    alert('Please select check-in and check-out dates first for your room booking');
+    return;
+  }
+  
+  console.log('[changeCottageDates] Opening cottage calendar with date constraints:', checkin, 'to', checkout);
+  
+  // Open calendar modal with date constraints
+  if (window.openCalendarModal) {
+    const constraintDates = {
+      startDate: checkin,
+      endDate: checkout
+    };
+    
+    // Mark that we're adding cottages to room booking
+    window.bookingModalCottageMode = true;
+    
+    // Pass editBookingId if we're in re-edit mode so calendar excludes current booking from availability
+    const editBookingId = bookingFormState.bookingId || null;
+    console.log('[changeCottageDates] editBookingId:', editBookingId);
+    console.log('[changeCottageDates] Skipping booked dates for current booking:', editBookingId);
+    
+    window.openCalendarModal('Select Cottage Dates', 3, 'cottages', editBookingId, constraintDates);
+  } else {
+    alert('Calendar modal not available');
+  }
+};
+
+// Handle cottage dates selected from calendar (for adding cottages to room booking)
+window.updateCottageDatesForRoomBooking = async function(selectedDates) {
+  console.log('[updateCottageDatesForRoomBooking] Cottage dates selected:', selectedDates);
+  
+  if (!Array.isArray(selectedDates) || selectedDates.length === 0) {
+    alert('No dates selected for cottage rental');
+    return;
+  }
+  
+  // Store the cottage dates in booking form state (array of individual dates)
+  bookingFormState.cottageDates = selectedDates.sort(); // Sort dates chronologically
+  
+  // Show the cottage selection field and populate with available cottages
+  const field = document.getElementById('cottage-selection-field');
+  const button = document.getElementById('add-cottage-toggle');
+  
+  if (field && button) {
+    field.style.display = 'block';
+    
+    // Format dates for display
+    const dateLabels = selectedDates.length > 3 
+      ? `${selectedDates.length} days selected`
+      : selectedDates.join(', ');
+    
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Hide Cottages (${dateLabels})
+    `;
+    
+    // Update the cottage dates display section
+    const datesDisplay = document.getElementById('cottage-dates-display');
+    const datesText = document.getElementById('cottage-dates-text');
+    if (datesDisplay && datesText) {
+      datesDisplay.style.display = 'block';
+      // Format dates nicely (e.g., "Nov 6, Nov 7, Nov 8")
+      const formattedDates = selectedDates.map(date => {
+        const d = new Date(date + 'T00:00:00');
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      }).join(', ');
+      datesText.textContent = `${formattedDates} (${selectedDates.length} ${selectedDates.length === 1 ? 'day' : 'days'})`;
+    }
+    
+    // Check availability for each selected date and get intersection
+    try {
+      const availabilityPromises = selectedDates.map(date => 
+        bookingState.getAvailableCottages(date, date)
+      );
+      
+      const availabilityResults = await Promise.all(availabilityPromises);
+      console.log('[updateCottageDatesForRoomBooking] Availability results:', availabilityResults);
+      
+      // Get intersection of available cottages across all selected dates
+      let availableCottages = availabilityResults[0] || [];
+      for (let i = 1; i < availabilityResults.length; i++) {
+        availableCottages = availableCottages.filter(cottage => 
+          availabilityResults[i].includes(cottage)
+        );
+      }
+      
+      console.log('[updateCottageDatesForRoomBooking] Available cottages for all dates:', availableCottages);
+      
+      // Populate the grid with available cottages
+      const grid = document.getElementById('inline-cottage-grid');
+      if (!grid) return;
+      
+      const pending = bookingFormState.pendingCottagesSelection;
+      const current = bookingState.selectedCottages || [];
+      const selected = (pending != null) ? pending : current; // != checks for both null and undefined
+      
+      if (availableCottages.length === 0) {
+        grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">No cottages available for all selected dates.</div>';
+        return;
+      }
+      
+      // Only render available cottages
+      grid.innerHTML = availableCottages.map(c => {
+        const isSelected = selected.includes(c);
+        return `
+          <div class="room-selection-card ${isSelected ? 'selected' : ''}" data-cottage-id="${c}" onclick="togglePendingCottage('${c}', event)">
+            <div class="room-card-image">
+              <img src="${getCottageInfo(c).image}" alt="${c}">
+              <div class="room-selection-indicator">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <path d="M20 6L9 17l-5-5"></path>
+                </svg>
+              </div>
+            </div>
+            <div class="room-card-content">
+              <h4>${c}</h4>
+              <div class="room-price">${getCottageInfo(c).price}</div>
+              <button type="button" class="room-select-btn" onclick="event.stopPropagation(); togglePendingCottage('${c}', event)">${isSelected ? 'Selected' : 'Select'}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      // Show confirm/close buttons
+      const confirmSection = document.getElementById('cottages-confirm-section');
+      const closeSection = document.getElementById('cottages-close-section');
+      if (confirmSection && closeSection) {
+        const hasChanges = (pending != null) && JSON.stringify(pending) !== JSON.stringify(current);
+        confirmSection.style.display = hasChanges ? 'block' : 'none';
+        closeSection.style.display = hasChanges ? 'none' : 'block';
+      }
+    } catch (error) {
+      console.error('[updateCottageDatesForRoomBooking] Error checking availability:', error);
+      console.error('[updateCottageDatesForRoomBooking] Error stack:', error.stack);
+      console.error('[updateCottageDatesForRoomBooking] Error message:', error.message);
+      alert('Error checking cottage availability: ' + error.message);
+    }
+  }
+};
+
+// Populate inline rooms grid
+async function populateInlineRoomsGrid() {
+  const grid = document.getElementById('inline-rooms-grid');
+  if (!grid) return;
+  
+  const dates = bookingFormState.preFillDates || {};
+  const checkin = dates.checkin;
+  const checkout = dates.checkout;
+  
+  if (!checkin || !checkout) {
+    grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Please select check-in and check-out dates first.</div>';
+    return;
+  }
+  
+  try {
+    const rooms = await bookingState.getAvailableRooms(checkin, checkout);
+    // Use pending selection if available, otherwise use current selection
+      const pending = bookingFormState.pendingRoomsSelection;
+      const current = bookingFormState.selectedRoomsFromFlow || [];
+      const selected = (pending != null) ? pending : current; // != checks for both null and undefined
+    
+    if (rooms.length === 0) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">No rooms available for selected dates.</div>';
+      return;
+    }
+    
+    grid.innerHTML = rooms.map(roomId => {
+      const isSelected = selected.includes(roomId);
+      return `
+        <div class="room-selection-card ${isSelected ? 'selected' : ''}" data-room-id="${roomId}" onclick="togglePendingRoom('${roomId}', event)">
+          <div class="room-card-image">
+            <img src="images/kina1.jpg" alt="${roomId}">
+            <div class="room-selection-indicator">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <path d="M20 6L9 17l-5-5"></path>
+              </svg>
+            </div>
+          </div>
+          <div class="room-card-content">
+            <h4>${roomId}</h4>
+            <div class="room-price">₱5,500/night</div>
+            <button type="button" class="room-select-btn" onclick="event.stopPropagation(); togglePendingRoom('${roomId}', event)">${isSelected ? 'Selected' : 'Select'}</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Show/hide confirm/close buttons based on whether there are pending changes
+      const confirmSection = document.getElementById('rooms-confirm-section');
+      const closeSection = document.getElementById('rooms-close-section');
+      if (confirmSection && closeSection) {
+        const hasChanges = (pending != null) && JSON.stringify(pending) !== JSON.stringify(current);
+        confirmSection.style.display = hasChanges ? 'block' : 'none';
+        closeSection.style.display = hasChanges ? 'none' : 'block';
+      }
+  } catch (e) {
+    console.error('[populateInlineRoomsGrid] Error:', e);
+    grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Failed to load rooms.</div>';
+  }
+}
+
+// Populate inline cottage grid for room bookings
+async function populateInlineCottageGrid() {
+  const grid = document.getElementById('inline-cottage-grid');
+  if (!grid) return;
+  
+  console.log('[populateInlineCottageGrid] 🔍 Called');
+  
+  const dates = bookingFormState.preFillDates || {};
+  const checkin = dates.checkin;
+  const checkout = dates.checkout;
+  
+  if (!checkin || !checkout) {
+    grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Please select check-in and check-out dates first.</div>';
+    return;
+  }
+  
+  try {
+    // Use the new getAvailableCottages method which checks availability across the ENTIRE date range
+    const cottages = await bookingState.getAvailableCottages(checkin, checkout);
+    console.log('[populateInlineCottageGrid] Available cottages:', cottages);
+    
+    // Remove duplicates from cottages array (just in case)
+    const uniqueCottages = [...new Set(cottages)];
+    console.log('[populateInlineCottageGrid] Unique cottages:', uniqueCottages);
+    
+    // Use pending selection if available, otherwise use current selection
+      const pending = bookingFormState.pendingCottagesSelection;
+      const current = bookingState.selectedCottages || [];
+      const selected = (pending != null) ? pending : current; // != checks for both null and undefined
+    
+    console.log('[populateInlineCottageGrid] Selected cottages:', selected);
+    
+    if (uniqueCottages.length === 0) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">No cottages available for selected dates.</div>';
+      return;
+    }
+    
+    // Only render available cottages (filter out unavailable ones)
+    grid.innerHTML = uniqueCottages.map(c => {
+      const isSelected = selected.includes(c);
+      return `
+        <div class="room-selection-card ${isSelected ? 'selected' : ''}" data-cottage-id="${c}" onclick="togglePendingCottage('${c}', event)">
+          <div class="room-card-image">
+            <img src="${getCottageInfo(c).image}" alt="${c}">
+            <div class="room-selection-indicator">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <path d="M20 6L9 17l-5-5"></path>
+              </svg>
+            </div>
+          </div>
+          <div class="room-card-content">
+            <h4>${c}</h4>
+            <div class="room-price">${getCottageInfo(c).price}</div>
+            <button type="button" class="room-select-btn" onclick="event.stopPropagation(); togglePendingCottage('${c}', event)">${isSelected ? 'Selected' : 'Select'}</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Show/hide confirm/close buttons based on whether there are pending changes
+    const confirmSection = document.getElementById('cottages-confirm-section');
+    const closeSection = document.getElementById('cottages-close-section');
+    if (confirmSection && closeSection) {
+      const hasChanges = pending !== null && JSON.stringify(pending) !== JSON.stringify(current);
+      confirmSection.style.display = hasChanges ? 'block' : 'none';
+      closeSection.style.display = hasChanges ? 'none' : 'block';
+    }
+  } catch (e) {
+    console.error('[populateInlineCottageGrid] Error:', e);
+    grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Failed to load cottages.</div>';
+  }
+}
+
+// Toggle pending room selection (before confirmation)
+window.togglePendingRoom = function(roomId, event) {
+  // Prevent form submission and event bubbling
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  // Initialize pending selection from current if not set (check for both null and undefined)
+  if (bookingFormState.pendingRoomsSelection == null) {
+    bookingFormState.pendingRoomsSelection = [...(bookingFormState.selectedRoomsFromFlow || [])];
+  }
+  
+  const list = bookingFormState.pendingRoomsSelection;
+  const idx = list.indexOf(roomId);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(roomId);
+  }
+  
+  // Update the grid to reflect pending selection
+  populateInlineRoomsGrid();
+};
+
+// Confirm rooms selection
+window.confirmRoomsSelection = function() {
+  if (bookingFormState.pendingRoomsSelection != null) {
+    bookingFormState.selectedRoomsFromFlow = [...bookingFormState.pendingRoomsSelection];
+    bookingFormState.pendingRoomsSelection = null;
+  }
+  
+  // Update form to refresh guest inputs and totals
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+  
+  // Close the selection area after confirming
+  closeRoomsSelection();
+};
+
+// Cancel rooms selection (revert pending changes and close)
+window.cancelRoomsSelection = function() {
+  bookingFormState.pendingRoomsSelection = null;
+  populateInlineRoomsGrid();
+  // Close the selection area
+  closeRoomsSelection();
+};
+
+// Close rooms selection area
+window.closeRoomsSelection = function() {
+  const field = document.getElementById('rooms-selection-field');
+  const button = document.getElementById('add-more-rooms-toggle');
+  
+  if (field) field.style.display = 'none';
+  if (button) {
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Add More Rooms
+    `;
+  }
+  // Reset pending selection when closing
+  bookingFormState.pendingRoomsSelection = null;
+};
+
+// Toggle inline room selection (keep for backward compatibility, but use pending version)
+window.toggleInlineRoom = function(roomId, event) {
+  togglePendingRoom(roomId, event);
+};
+
+// Toggle pending cottage selection (before confirmation)
+window.togglePendingCottage = function(cottageId, event) {
+  // Prevent form submission and event bubbling
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  // Initialize pending selection from current if not set (check for both null and undefined)
+  if (bookingFormState.pendingCottagesSelection == null) {
+    bookingFormState.pendingCottagesSelection = [...(bookingState.selectedCottages || [])];
+  }
+  
+  const list = bookingFormState.pendingCottagesSelection;
+  const idx = list.indexOf(cottageId);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(cottageId);
+  }
+  
+  // Update the grid to reflect pending selection
+  populateInlineCottageGrid();
+};
+
+// Confirm cottages selection
+window.confirmCottagesSelection = function() {
+  if (bookingFormState.pendingCottagesSelection != null) {
+    // Clear existing and add new selections
+    bookingState.selectedCottages = [...bookingFormState.pendingCottagesSelection];
+    bookingFormState.pendingCottagesSelection = null;
+  }
+  
+  // Update form to refresh totals
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+  
+  // Close the selection area after confirming
+  closeCottagesSelection();
+};
+
+// Cancel cottages selection (revert pending changes and close)
+window.cancelCottagesSelection = function() {
+  bookingFormState.pendingCottagesSelection = null;
+  populateInlineCottageGrid();
+  // Close the selection area
+  closeCottagesSelection();
+};
+
+// Close cottages selection area
+window.closeCottagesSelection = function() {
+  const field = document.getElementById('cottage-selection-field');
+  const button = document.getElementById('add-cottage-toggle');
+  
+  if (field) field.style.display = 'none';
+  if (button) {
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Add Cottage to Room Booking
+    `;
+  }
+  // Reset pending selection when closing
+  bookingFormState.pendingCottagesSelection = null;
+};
+
 window.toggleCottageSelection = toggleCottageSelection;
 window.addSelectedCottagesToBooking = addSelectedCottagesToBooking;
 window.showBookingForm = showBookingForm;
@@ -1760,6 +2389,42 @@ function initializeForm() {
           grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Failed to load cottages.</div>';
         }
       })();
+    }
+  }
+  
+  // Inline rooms and cottage grids for room bookings (populate if fields are visible)
+  if (bookingFormState.reservationType === 'room') {
+    const roomsField = document.getElementById('rooms-selection-field');
+    const cottageField = document.getElementById('cottage-selection-field');
+    
+    // Populate rooms grid if field is visible
+    if (roomsField && roomsField.style.display !== 'none') {
+      populateInlineRoomsGrid();
+    }
+    
+    // Populate cottage grid if field is visible
+    if (cottageField && cottageField.style.display !== 'none') {
+      populateInlineCottageGrid();
+    }
+    
+    // Prepare cottage dates display if cottage dates exist (for editing)
+    // But keep section COLLAPSED initially - user can expand it by clicking button
+    if (bookingFormState.cottageDates && bookingFormState.cottageDates.length > 0) {
+      const datesDisplay = document.getElementById('cottage-dates-display');
+      const datesText = document.getElementById('cottage-dates-text');
+      
+      // Pre-populate dates display (but keep hidden until section is expanded)
+      if (datesDisplay && datesText) {
+        const formattedDates = bookingFormState.cottageDates.map(date => {
+          const d = new Date(date + 'T00:00:00');
+          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }).join(', ');
+        datesText.textContent = `${formattedDates} (${bookingFormState.cottageDates.length} ${bookingFormState.cottageDates.length === 1 ? 'day' : 'days'})`;
+      }
+      
+      // DO NOT show cottage section initially - keep collapsed
+      // DO NOT change button text - keep as "Add Cottage to Room Booking"
+      // User will click to expand and see their selected cottages
     }
   }
 }
@@ -2119,7 +2784,8 @@ async function saveBooking(bookingData) {
       specialRequests: bookingData.selections.specialRequests || '',
       selectedCottages: category === 'cottages' ? (bookingFormState.selectedCottagesFromFlow || bookingData.selections?.cottages || []) : (bookingState.selectedCottages || []),
       selectedHall: null, // Function hall selection removed from modal
-      category: category // Store category in booking record
+      category: category, // Store category in booking record
+      cottageDates: bookingData.dates.cottageDates || [] // Array of individual dates for cottage rentals
     };
     if (category === 'cottages') {
       bookingPayload.usage_date = bookingData.dates.usage_date || bookingData.dates.date;
@@ -2209,7 +2875,8 @@ async function updateExistingBooking(bookingId, bookingData) {
       specialRequests: bookingData.selections.specialRequests || '',
       selectedCottages: bookingState.selectedCottages || [],
       selectedHall: null, // Function hall selection removed from modal
-      category: category // Store category in booking record
+      category: category, // Store category in booking record
+      cottageDates: bookingData.dates.cottageDates || [] // Array of individual dates for cottage rentals
     };
     if (category === 'cottages') {
       bookingPayload.usage_date = bookingData.dates.usage_date || bookingData.dates.date;
@@ -2219,6 +2886,13 @@ async function updateExistingBooking(bookingId, bookingData) {
     }
     
     console.log('[Booking] Update payload:', JSON.stringify(bookingPayload, null, 2));
+    
+    // Debug: Verify cottage dates are included in update
+    if (bookingPayload.cottageDates && bookingPayload.cottageDates.length > 0) {
+      console.log('[Booking] 🏠 Update includes cottage dates:', bookingPayload.cottageDates);
+    } else {
+      console.log('[Booking] ⚠️ Update does NOT include cottage dates');
+    }
 
     const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
     const useMockApi = !isProduction;
@@ -2356,8 +3030,23 @@ window.submitBooking = async function(event) {
     
     bookingData.selections = {
       rooms: selectedRooms,
-      cottages: bookingFormState.addCottageToRoom ? Array.from(formData.getAll('selectedCottages')) : []
+      cottages: bookingFormState.addCottageToRoom ? (bookingState.selectedCottages || []) : []
     };
+    
+    console.log('[Booking] 🏠 Cottage selection:', {
+      addCottageToRoom: bookingFormState.addCottageToRoom,
+      selectedCottages: bookingState.selectedCottages,
+      cottageDates: bookingFormState.cottageDates
+    });
+    
+    // Add cottage dates if cottages were selected for room booking
+    // Include whenever cottageDates exist, regardless of addCottageToRoom flag
+    if (bookingFormState.cottageDates && bookingFormState.cottageDates.length > 0 && bookingState.selectedCottages && bookingState.selectedCottages.length > 0) {
+      bookingData.dates.cottageDates = bookingFormState.cottageDates; // Array of individual dates
+      console.log('[Booking] Including cottage dates:', bookingFormState.cottageDates);
+    } else if (bookingState.selectedCottages && bookingState.selectedCottages.length > 0 && (!bookingFormState.cottageDates || bookingFormState.cottageDates.length === 0)) {
+      console.warn('[Booking] ⚠️ Cottages selected but no cottage dates - will use booking date range');
+    }
     
     // Collect per-room guest details
     const perRoomGuests = [];
@@ -2641,9 +3330,17 @@ function showBookingSuccess(bookingData, savedBooking) {
   // Build cottages list
   let cottagesList = '';
   if (selectedCottages.length > 0) {
+    // Get cottage dates if available
+    const cottageDates = bookingFormState.cottageDates || bookingData.dates.cottageDates || [];
+    const hasSpecificDates = cottageDates.length > 0;
+    
     cottagesList = `
       <div class="success-section">
         <h4>Selected Cottages</h4>
+        ${hasSpecificDates ? `<p style="color: #1e40af; font-size: 13px; margin-bottom: 8px;">Rental dates: ${cottageDates.map(date => {
+          const d = new Date(date + 'T00:00:00');
+          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }).join(', ')} (${cottageDates.length} ${cottageDates.length === 1 ? 'day' : 'days'})</p>` : ''}
         <ul class="booking-items-list">
           ${selectedCottages.map(cottageId => `<li><strong>${cottageId}</strong></li>`).join('')}
         </ul>
