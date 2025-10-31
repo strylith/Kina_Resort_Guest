@@ -1,0 +1,2926 @@
+// Comprehensive Booking Modal Component
+// Handles Room, Cottage, and Function Hall reservations
+
+import { bookingState } from '../utils/bookingState.js';
+
+let currentBookingModal = null;
+let bookingFormState = {
+  reservationType: 'room',
+  category: 'rooms',
+  addCottageToRoom: false,
+  addRoomToCottage: false,
+  formData: {},
+  errors: {},
+  savedFormData: {},
+  returningFromCottage: false, // Track if we're returning from cottage selection
+  editMode: false, // Track if we're editing an existing booking
+  bookingId: null // ID of booking being edited
+};
+
+// Reset all transient booking modal state and selections
+function resetBookingModalState() {
+  console.log('[resetBookingModalState] Resetting modal state (NOT clearing global selections)');
+  
+  try {
+    // Clear modal-local state
+    bookingFormState.reservationType = 'room';
+    bookingFormState.category = 'rooms';
+    bookingFormState.addCottageToRoom = false;
+    bookingFormState.addRoomToCottage = false;
+    bookingFormState.formData = {};
+    bookingFormState.errors = {};
+    bookingFormState.savedFormData = {};
+    bookingFormState.returningFromCottage = false;
+    bookingFormState.editMode = false;
+    bookingFormState.bookingId = null;
+    bookingFormState.preFillDates = null;
+    bookingFormState.selectedRoomsFromFlow = [];
+    bookingFormState.selectedCottagesFromFlow = [];
+    bookingFormState.guestInfo = {};
+    bookingFormState.paymentMode = null;
+    bookingFormState.perRoomGuests = [];
+  } catch (_) {}
+  
+  // DO NOT clear bookingState.selectedCottages or bookingState.selectedRooms
+  // These represent the user's selections from the cottage/room selection flow
+  // and should persist even when the modal closes without completing booking
+  
+  try {
+    // Clear any pending preselection coming from cards
+    if (window.preselectedCottageType) delete window.preselectedCottageType;
+  } catch (_) {}
+  
+  console.log('[resetBookingModalState] Modal state reset, global selections preserved');
+}
+
+// Room types for selection
+const roomTypes = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
+const cottageTypes = ['Beachfront Cottage', 'Garden View Cottage', 'Family Cottage'];
+const functionHallTypes = ['Grand Function Hall', 'Intimate Function Hall'];
+
+// Mock reservation data for consistent availability
+const mockReservationData = {
+  'Room A1': 8,
+  'Room A2': 12,
+  'Room A3': 6,
+  'Room A4': 15,
+  'Grand Function Hall': 5,
+  'Intimate Function Hall': 7
+};
+
+// Mock booking database for availability checking
+const mockBookings = {
+  'Room A1': [],
+  'Room A2': [],
+  'Room A3': [],
+  'Room A4': []
+};
+
+// Check if room is available for given dates (using database)
+async function isRoomAvailable(roomId, checkinDate, checkoutDate) {
+  try {
+    const { checkAvailability } = await import('../utils/api.js');
+    
+    // Exclude current booking from conflict checks if in edit mode
+    const excludeBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    
+    // Check availability for the entire date range
+    const result = await checkAvailability(1, checkinDate, checkoutDate, null, excludeBookingId);
+    
+    // If not available, check if there are conflicts
+    if (!result.available) {
+      // Check specific dates in the range
+  let currentDate = new Date(checkinDate);
+  const endDate = new Date(checkoutDate);
+  
+  const formatDateLocal = (d) => {
+    const dd = new Date(d); dd.setHours(0,0,0,0);
+    return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
+  };
+  while (currentDate < endDate) {
+        const dateString = formatDateLocal(currentDate);
+        
+        // Check if this date is in booked dates
+        const isBooked = result.bookedDates?.some(booking => {
+          const bookingCheckinStr = formatDateLocal(booking.check_in);
+          const bookingCheckoutStr = formatDateLocal(booking.check_out);
+          return dateString >= bookingCheckinStr && dateString < bookingCheckoutStr; // checkout exclusive
+        });
+        
+        if (isBooked) {
+      return false;
+    }
+        
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+    }
+    
+    return result.available;
+  } catch (error) {
+    console.error('Error checking room availability:', error);
+    // Fallback to true on error to allow booking
+    return true;
+  }
+}
+
+// Check if cottage is available for given date (using database)
+async function isCottageAvailable(cottageId, visitDate) {
+  try {
+    const { checkAvailability } = await import('../utils/api.js');
+    
+    // Exclude current booking from conflict checks if in edit mode
+    const excludeBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    
+    // Single-day cottage booking: check_in === check_out === visitDate
+    const result = await checkAvailability(1, visitDate, visitDate, 'cottages', excludeBookingId);
+    
+    if (result && result.dateAvailability && result.dateAvailability[visitDate]) {
+      const dayData = result.dateAvailability[visitDate];
+      const availableCottages = dayData.availableCottages || [];
+      const isAvailable = availableCottages.includes(cottageId);
+      
+      console.log(`[Booking] Cottage ${cottageId} availability on ${visitDate}:`, isAvailable ? 'AVAILABLE' : 'NOT AVAILABLE');
+      
+      return isAvailable;
+    }
+    
+    console.log(`[Booking] No availability data for cottage ${cottageId} on ${visitDate}, defaulting to available`);
+    return true; // Default to available if no data
+  } catch (error) {
+    console.error('[Booking] Error checking cottage availability:', error);
+    return true; // Allow on error
+  }
+}
+
+
+// Open booking modal with optional pre-selection and pre-filled dates
+export function openBookingModal(initialType = 'room', packageTitle = '', preFillData = null, editMode = false, bookingId = null, categoryArg = null) {
+  console.log('[BookingModal] openBookingModal called:', {
+    initialType,
+    packageTitle,
+    editMode,
+    bookingId,
+    hasPreFillData: !!preFillData
+  });
+  
+  // Hide continue button while modal is open
+  const floatingBtn = document.getElementById('floating-continue-btn');
+  if (floatingBtn) {
+    floatingBtn.style.display = 'none';
+    console.log('[openBookingModal] Hiding continue button while modal is open');
+  }
+  
+  closeBookingModal();
+  
+  bookingFormState.reservationType = initialType;
+  // Set category, prefer explicit arg otherwise derive from type
+  const typeToCategory = { 'room': 'rooms', 'cottage': 'cottages', 'function-hall': 'function-halls' };
+  bookingFormState.category = categoryArg || typeToCategory[initialType] || 'rooms';
+  bookingFormState.editMode = editMode;
+  bookingFormState.bookingId = bookingId;
+  bookingFormState.addCottageToRoom = false;
+  bookingFormState.addRoomToCottage = false;
+  bookingFormState.formData = {};
+  bookingFormState.errors = {};
+  
+  // Handle pre-fill data (dates, selected rooms/cottages, etc.)
+  if (preFillData) {
+    if (editMode) {
+      console.log('[BookingModal] Edit mode: Loading pre-fill data into form state');
+      // Pre-fill all fields for editing
+      bookingFormState.preFillDates = {
+        checkin: preFillData.checkIn || preFillData.checkin,
+        checkout: preFillData.checkOut || preFillData.checkout,
+        date: preFillData.date // For single-day bookings (cottages)
+      };
+      bookingFormState.selectedRoomsFromFlow = preFillData.selectedRooms || [];
+      bookingFormState.selectedCottagesFromFlow = preFillData.selectedCottages || [];
+      bookingFormState.guestInfo = preFillData.guestInfo || {};
+      bookingFormState.paymentMode = preFillData.paymentMode;
+      bookingFormState.perRoomGuests = preFillData.perRoomGuests || [];
+      console.log('[BookingModal] Pre-fill data loaded:', {
+        dates: bookingFormState.preFillDates,
+        rooms: bookingFormState.selectedRoomsFromFlow,
+        cottages: bookingFormState.selectedCottagesFromFlow,
+        guestInfo: bookingFormState.guestInfo,
+        paymentMode: bookingFormState.paymentMode,
+        perRoomGuests: bookingFormState.perRoomGuests?.length || 0
+      });
+    } else if (preFillData.fromDateSelection) {
+      // Coming from date selection flow
+      bookingFormState.preFillDates = {
+        checkin: preFillData.checkin,
+        checkout: preFillData.checkout,
+        date: preFillData.date // For single-day bookings (cottages)
+      };
+      bookingFormState.selectedRoomsFromFlow = preFillData.selectedRooms || [];
+      bookingFormState.selectedCottagesFromFlow = preFillData.selectedCottages || [];
+    } else {
+      // Legacy preFillDates format
+      bookingFormState.preFillDates = preFillData;
+      bookingFormState.selectedRoomsFromFlow = [];
+      bookingFormState.selectedCottagesFromFlow = [];
+    }
+  } else {
+    bookingFormState.preFillDates = null;
+    bookingFormState.selectedRoomsFromFlow = [];
+    bookingFormState.selectedCottagesFromFlow = [];
+    bookingFormState.guestInfo = {};
+    bookingFormState.paymentMode = null;
+    bookingFormState.perRoomGuests = [];
+  }
+  
+  const modalHTML = `
+    <div class="booking-modal-overlay" id="booking-modal-overlay">
+      <div class="booking-modal">
+        <button class="booking-modal-close" onclick="closeBookingModal()" aria-label="Close booking modal" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        
+        <div class="booking-modal-header">
+          <h2>${bookingFormState.editMode ? 'Edit Booking' : getModalTitle()}</h2>
+          <p class="booking-subtitle">${bookingFormState.editMode ? 'Update your booking details below' : 'Complete your booking details below'}</p>
+        </div>
+        
+        <form class="booking-form" id="booking-form" onsubmit="submitBooking(event)">
+          <div class="booking-form-content">
+            ${renderFormFields(initialType)}
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  currentBookingModal = document.getElementById('booking-modal-overlay');
+  
+  // Add event listeners
+  currentBookingModal.addEventListener('click', (e) => {
+    if (e.target === currentBookingModal) {
+      closeBookingModal();
+    }
+  });
+  
+  // Prevent background scrolling when modal is open
+  document.body.style.overflow = 'hidden';
+  document.body.classList.add('modal-open');
+  
+  // Disable Lenis smooth scrolling when modal is open
+  const lenisInstance = window.lenisInstance || document.querySelector('.lenis')?.lenis;
+  if (lenisInstance) {
+    lenisInstance.stop();
+  }
+  
+  // Prevent scroll events from bubbling to background
+  currentBookingModal.addEventListener('wheel', (e) => {
+    e.stopPropagation();
+  }, { passive: false });
+  
+  // Prevent middle mouse scroll from affecting background
+  currentBookingModal.addEventListener('mousedown', (e) => {
+    if (e.button === 1) { // Middle mouse button
+      e.preventDefault();
+    }
+  });
+  
+  document.addEventListener('keydown', handleEscapeKey);
+  
+  // Initialize form
+  initializeForm();
+  
+  // Animate modal in
+  setTimeout(() => {
+    currentBookingModal.classList.add('show');
+  }, 10);
+}
+
+// Close booking modal
+export function closeBookingModal() {
+  if (currentBookingModal) {
+    currentBookingModal.classList.remove('show');
+    
+    // Restore background scrolling
+    document.body.style.overflow = '';
+    document.body.classList.remove('modal-open');
+    
+    // Re-enable Lenis smooth scrolling when modal is closed
+    const lenisInstance = window.lenisInstance || document.querySelector('.lenis')?.lenis;
+    if (lenisInstance) {
+      lenisInstance.start();
+    }
+    
+    setTimeout(() => {
+      if (currentBookingModal && currentBookingModal.parentNode) {
+        currentBookingModal.parentNode.removeChild(currentBookingModal);
+      }
+      currentBookingModal = null;
+      // Reset modal state once closed
+      resetBookingModalState();
+    }, 300);
+    
+    document.removeEventListener('keydown', handleEscapeKey);
+    
+    // Show floating continue button if there are still selections
+    // This ensures button reappears after modal closes if selections exist
+    setTimeout(() => {
+      // Don't restore button if another modal is already open
+      const modalStillOpen = document.querySelector('.booking-modal-overlay.show');
+      if (modalStillOpen) {
+        console.log('[closeBookingModal] Another modal is open, not restoring button');
+        return;
+      }
+      
+      const btn = document.getElementById('floating-continue-btn');
+      if (btn) {
+        const hasSelections = (bookingState.selectedCottages && bookingState.selectedCottages.length > 0) ||
+                              (bookingState.selectedRooms && bookingState.selectedRooms.length > 0);
+        
+        if (hasSelections) {
+          console.log('[closeBookingModal] Selections still exist, showing continue button');
+          btn.style.display = 'flex';
+          
+          // Update button text and onclick based on selection type
+          if (bookingState.selectedCottages && bookingState.selectedCottages.length > 0) {
+            const count = bookingState.selectedCottages.length;
+            btn.textContent = count > 0 
+              ? `Continue with ${count} cottage${count > 1 ? 's' : ''}` 
+              : 'Select at least one cottage';
+            btn.disabled = count === 0;
+            
+            // Restore onclick handler for cottages
+            btn.onclick = function() {
+              if (bookingState.selectedCottages.length > 0) {
+                window.openBookingModal('cottage', 'Cottage Booking', {
+                  date: bookingState.dates.checkin,
+                  selectedCottages: bookingState.selectedCottages,
+                  fromDateSelection: true
+                });
+              }
+            };
+          } else if (bookingState.selectedRooms && bookingState.selectedRooms.length > 0) {
+            const count = bookingState.selectedRooms.length;
+            btn.textContent = count > 0 
+              ? `Continue with ${count} room${count > 1 ? 's' : ''}` 
+              : 'Select at least one room';
+            btn.disabled = count === 0;
+            
+            // Restore onclick handler for rooms
+            btn.onclick = function() {
+              if (bookingState.selectedRooms.length > 0) {
+                window.openBookingModal('room', 'Room Booking', {
+                  checkin: bookingState.dates.checkin,
+                  checkout: bookingState.dates.checkout,
+                  selectedRooms: bookingState.selectedRooms,
+                  fromDateSelection: true
+                });
+              }
+            };
+          }
+        } else {
+          console.log('[closeBookingModal] No selections, hiding continue button');
+          btn.style.display = 'none';
+        }
+      }
+    }, 350); // Wait for modal close animation to complete
+  }
+}
+
+// Change reservation type
+function changeReservationType(type) {
+  bookingFormState.reservationType = type;
+  const typeToCategory = { 'room': 'rooms', 'cottage': 'cottages', 'function-hall': 'function-halls' };
+  bookingFormState.category = typeToCategory[type] || 'rooms';
+  bookingFormState.addCottageToRoom = false;
+  bookingFormState.addRoomToCottage = false;
+  
+  // Update active tab
+  document.querySelectorAll('.type-tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`[data-type="${type}"]`).classList.add('active');
+  
+  // Re-render form
+  const formContent = document.querySelector('.booking-form-content');
+  formContent.innerHTML = renderFormFields(type);
+  
+  // Re-initialize form
+  initializeForm();
+}
+
+// Render form fields based on reservation type
+function renderFormFields(type) {
+  const baseFields = `
+    <div class="form-section">
+      <h3>Main Booker Information</h3>
+      <p class="section-description">Person making the reservation and responsible for payment</p>
+      <div class="form-field">
+        <label for="guest-name" class="form-label">Full Name *</label>
+        <input type="text" id="guest-name" name="guestName" class="form-input" value="${bookingFormState.guestInfo?.name || ''}" required>
+        <div class="form-error" id="guest-name-error"></div>
+      </div>
+      
+      <div class="form-field">
+        <label for="email" class="form-label">Email Address *</label>
+        <input type="email" id="email" name="email" class="form-input" value="${bookingFormState.guestInfo?.email || ''}" required>
+        <div class="form-error" id="email-error"></div>
+      </div>
+      
+      <div class="form-field">
+        <label for="contact" class="form-label">Contact Number *</label>
+        <input type="tel" id="contact" name="contact" class="form-input" value="${bookingFormState.guestInfo?.contact || ''}" required>
+        <div class="form-error" id="contact-error"></div>
+      </div>
+    </div>
+  `;
+  
+  if (type === 'room') {
+    return baseFields + renderRoomFields();
+  } else if (type === 'cottage') {
+    return baseFields + renderCottageFields();
+  } else if (type === 'function-hall') {
+    return baseFields + renderFunctionHallFields();
+  }
+}
+
+// Render room booking fields
+function renderRoomFields() {
+  return `
+    <div class="form-section">
+      <h3>Room Details</h3>
+      
+      <div class="date-time-group">
+        <div class="form-field">
+          <label for="checkin-date" class="form-label">Check-in Date *</label>
+          <input type="date" id="checkin-date" name="checkinDate" class="form-input" onclick="openCalendarForCheckin()" readonly data-required="true">
+          <div class="form-error" id="checkin-date-error"></div>
+        </div>
+        
+        <div class="form-field">
+          <label for="checkout-date" class="form-label">Check-out Date *</label>
+          <input type="date" id="checkout-date" name="checkoutDate" class="form-input" onclick="openCalendarForCheckout()" readonly data-required="true">
+          <div class="form-error" id="checkout-date-error"></div>
+        </div>
+      </div>
+      
+      <div class="form-field auto-calculated-field">
+        <label class="form-label">Number of Nights</label>
+        <div class="calculated-value" id="nights-display">0</div>
+      </div>
+      
+      ${generatePerRoomGuestInputs()}
+        
+        <div class="form-field">
+        <div class="total-guests-display" id="total-guests-display">
+          <strong>Total: 0 adults, 0 children across 0 rooms</strong>
+        </div>
+      </div>
+      
+      ${generateSelectedRoomsDisplay()}
+      
+      <div class="add-option-section">
+        <button type="button" class="add-option-toggle" onclick="showCottageSelection()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add Cottage to Room Booking
+        </button>
+        
+        <div class="form-field" id="cottage-selection-field" style="display: none;">
+          <label class="form-label">Cottage Selection</label>
+          <div class="checkbox-group">
+            ${cottageTypes.map(cottage => `
+              <label class="checkbox-item">
+                <input type="checkbox" name="selectedCottages" value="${cottage}">
+                <span class="checkbox-label">${cottage}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    ${renderPaymentAndAgreement()}
+  `;
+}
+
+// Render cottage booking fields
+function renderCottageFields() {
+  return `
+    <div class="form-section">
+      <h3>Cottage Details</h3>
+      
+      <div class="form-field">
+        <label for="cottage-date" class="form-label">Date of Visit *</label>
+        <input type="date" id="cottage-date" name="cottageDate" class="form-input" onclick="openCalendarForCottage()" readonly data-required="true">
+        <div class="form-error" id="cottage-date-error"></div>
+      </div>
+      
+      <div class="guests-group">
+        <div class="form-field">
+          <label for="cottage-adults" class="form-label">Number of Adults *</label>
+          <input type="number" id="cottage-adults" name="cottageAdults" class="form-input" min="1" value="1" required>
+          <div class="form-error" id="cottage-adults-error"></div>
+        </div>
+        
+        <div class="form-field">
+          <label for="cottage-children" class="form-label">Number of Children</label>
+          <input type="number" id="cottage-children" name="cottageChildren" class="form-input" min="0" value="0">
+        </div>
+      </div>
+      
+      ${generateSelectedCottagesDisplay()}
+      
+    </div>
+    
+    ${renderPaymentAndAgreement()}
+  `;
+}
+
+// Render function hall booking fields
+function renderFunctionHallFields() {
+  return `
+    <div class="form-section">
+      <h3>Event Details</h3>
+      
+      <div class="form-field">
+        <label for="organization" class="form-label">Organization (Optional)</label>
+        <input type="text" id="organization" name="organization" class="form-input" placeholder="Company or organization name">
+      </div>
+      
+      <div class="form-field">
+        <label for="event-date" class="form-label">Event Date *</label>
+        <input type="date" id="event-date" name="eventDate" class="form-input" onclick="openCalendarForFunctionHall()" readonly data-required="true">
+        <div class="form-error" id="event-date-error"></div>
+      </div>
+      
+      <div class="form-field">
+        <label class="form-label">Event Time Range *</label>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <div style="flex: 1;">
+            <label for="event-start" class="form-label" style="font-size: 0.9em; margin-bottom: 4px;">Start Time</label>
+            <input type="time" id="event-start" name="eventStart" class="form-input" required>
+            <div class="form-error" id="event-start-error"></div>
+          </div>
+          <div style="flex: 1;">
+            <label for="event-end" class="form-label" style="font-size: 0.9em; margin-bottom: 4px;">End Time</label>
+            <input type="time" id="event-end" name="eventEnd" class="form-input" required>
+            <div class="form-error" id="event-end-error"></div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-field">
+        <label for="event-type" class="form-label">Event Type *</label>
+        <select id="event-type" name="eventType" class="form-select" required>
+          <option value="">Select Event Type</option>
+          <option value="wedding">Wedding</option>
+          <option value="birthday">Birthday Party</option>
+          <option value="conference">Conference</option>
+          <option value="meeting">Meeting</option>
+          <option value="other">Other</option>
+        </select>
+        <div class="form-error" id="event-type-error"></div>
+      </div>
+      
+      <div class="form-field">
+        <label for="event-guests" class="form-label">Number of Guests *</label>
+        <input type="number" id="event-guests" name="eventGuests" class="form-input" min="1" required>
+        <div class="form-error" id="event-guests-error"></div>
+      </div>
+      
+      <div class="form-field">
+        
+      </div>
+      
+      <div class="form-field">
+        <label for="special-requests" class="form-label">Special Requests</label>
+        <textarea id="special-requests" name="specialRequests" class="form-textarea" rows="3" placeholder="Any special requirements or requests..."></textarea>
+      </div>
+    </div>
+    
+    ${renderPaymentAndAgreement()}
+  `;
+}
+
+// Render cost summary
+function renderCostSummary() {
+  const costs = calculateTotalCost();
+  if (!costs || !bookingFormState.selectedRoomsFromFlow?.length) return '';
+  
+  return `
+    <div class="booking-cost-summary">
+      <h4>Cost Breakdown</h4>
+      <div class="cost-line">
+        <span>Rooms (${bookingFormState.selectedRoomsFromFlow?.length || 0} × ₱5,500 × ${costs.nights} nights)</span>
+        <span>₱${costs.roomCost.toLocaleString()}</span>
+      </div>
+      ${bookingState.selectedCottages.length > 0 ? `
+        <div class="cost-line">
+          <span>Cottages (${bookingState.selectedCottages.length} × ${costs.nights} nights)</span>
+          <span>₱${costs.cottageCost.toLocaleString()}</span>
+        </div>
+      ` : ''}
+      <div class="cost-total">
+        <span><strong>Total</strong></span>
+        <span><strong>₱${costs.total.toLocaleString()}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
+// Render payment and agreement section
+function renderPaymentAndAgreement() {
+  return `
+    ${renderCostSummary()}
+    
+    <div class="form-section">
+      <h3>Payment & Agreement</h3>
+      
+      <div class="form-field">
+        <label for="payment-mode" class="form-label">Mode of Payment *</label>
+        <select id="payment-mode" name="paymentMode" class="form-select" required>
+          <option value="" ${!bookingFormState.paymentMode ? 'disabled selected' : ''}>Select Payment Method</option>
+          <option value="bank-transfer" ${bookingFormState.paymentMode === 'bank-transfer' ? 'selected' : ''}>Bank Transfer</option>
+          <option value="gcash" ${bookingFormState.paymentMode === 'gcash' ? 'selected' : ''}>GCash</option>
+          <option value="credit-card" ${bookingFormState.paymentMode === 'credit-card' ? 'selected' : ''}>Credit Card</option>
+        </select>
+        <div class="form-error" id="payment-mode-error"></div>
+      </div>
+      
+      <div class="agreement-section">
+        <div class="terms-container" id="terms-container">
+          <div class="terms-header" onclick="toggleTermsExpansion()">
+            <h4>Terms & Conditions</h4>
+            <button type="button" class="terms-toggle-btn" id="terms-toggle-btn">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+          </div>
+          <div class="terms-content collapsed" id="terms-content">
+            <div class="terms-inner" id="terms-inner">
+              Loading terms...
+            </div>
+          </div>
+        </div>
+        
+        <label class="agreement-checkbox">
+          <input type="checkbox" id="agreement" name="agreement" required>
+          <span class="agreement-text">
+            I have read and agree to the above booking and cancellation policy
+          </span>
+        </label>
+        <div class="form-error" id="agreement-error"></div>
+      </div>
+      
+      <button type="submit" class="booking-submit-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 12l2 2 4-4"></path>
+          ${bookingFormState.editMode ? '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>' : '<path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>'}
+          <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
+          <path d="M12 3c0 1-1 3-3 3s-3-2-3-3 1-3 3-3 3 2 3 3"></path>
+          <path d="M12 21c0-1 1-3 3-3s3 2 3 3-1 3-3 3-3-2-3-3"></path>
+        </svg>
+        ${getSubmitButtonText()}
+      </button>
+    </div>
+  `;
+}
+
+// Get submit button text based on reservation type and edit mode
+function getSubmitButtonText() {
+  if (bookingFormState.editMode) {
+    return 'Update Booking';
+  }
+  switch (bookingFormState.reservationType) {
+    case 'room':
+      return 'Book My Room';
+    case 'cottage':
+      return 'Book Cottage';
+    case 'function-hall':
+      return 'Book Function Hall';
+    default:
+      return 'Complete Booking';
+  }
+}
+
+// Generate room checkboxes with availability checking
+function generateRoomCheckboxes() {
+  const checkinDate = document.getElementById('checkin-date')?.value;
+  const checkoutDate = document.getElementById('checkout-date')?.value;
+  
+  return roomTypes.map(room => {
+    let isAvailable = true;
+    let availabilityClass = '';
+    let availabilityLabel = '';
+    
+    if (checkinDate && checkoutDate) {
+      isAvailable = isRoomAvailable(room, checkinDate, checkoutDate);
+      if (!isAvailable) {
+        availabilityClass = 'unavailable';
+        availabilityLabel = '<span class="not-available-label">Not Available</span>';
+      }
+    }
+    
+    return `
+      <label class="checkbox-item ${availabilityClass}">
+        <input type="checkbox" name="selectedRooms" value="${room}" ${!isAvailable ? 'disabled' : ''}>
+        <span class="checkbox-label">
+          <span class="${!isAvailable ? 'room-name-strike' : ''}">${room}</span>
+          ${availabilityLabel}
+        </span>
+      </label>
+    `;
+  }).join('');
+}
+
+// Generate per-room guest inputs
+function generatePerRoomGuestInputs() {
+  // Get selected rooms from booking flow or default to empty
+  const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
+  
+  if (selectedRooms.length === 0) {
+    // No pre-selected rooms, show default single set of inputs
+    return `
+      <div class="guests-group">
+        <div class="form-field">
+          <label for="adults" class="form-label">Number of Adults *</label>
+          <input type="number" id="adults" name="adults" class="form-input" min="1" value="1" required>
+          <div class="form-error" id="adults-error"></div>
+        </div>
+        
+        <div class="form-field">
+          <label for="children" class="form-label">Number of Children</label>
+          <input type="number" id="children" name="children" class="form-input" min="0" value="0">
+        </div>
+      </div>
+    `;
+  }
+  
+  // Generate per-room guest inputs with name field
+  let html = '<div class="per-room-guests-section">';
+  
+  selectedRooms.forEach(roomId => {
+    // Get pre-filled data for this room if in edit mode
+    const roomGuest = bookingFormState.perRoomGuests?.find(rg => rg.roomId === roomId);
+    const guestName = roomGuest?.guestName || '';
+    const adults = roomGuest?.adults || 1;
+    const children = roomGuest?.children || 0;
+    
+    html += `
+      <div class="room-guests-card" data-room-id="${roomId}">
+        <h5>${roomId}</h5>
+        
+        <div class="form-field">
+          <label for="${roomId}-guest-name" class="form-label">Primary Guest Name (Optional)</label>
+          <input type="text" id="${roomId}-guest-name" name="${roomId}-guestName" class="form-input" value="${guestName}" placeholder="Leave blank if same as main booker">
+          <small class="form-hint">The person staying in this room</small>
+        </div>
+        
+        <div class="guests-inputs-row">
+          <div class="form-field">
+            <label for="${roomId}-adults" class="form-label">Adults *</label>
+            <input type="number" id="${roomId}-adults" name="${roomId}-adults" class="form-input" min="1" max="4" value="${adults}" required onchange="updateTotalGuests()">
+          </div>
+          <div class="form-field">
+            <label for="${roomId}-children" class="form-label">Children</label>
+            <input type="number" id="${roomId}-children" name="${roomId}-children" class="form-input" min="0" max="3" value="${children}" onchange="updateTotalGuests()">
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  return html;
+}
+
+// Generate selected rooms and cottages display (for room bookings)
+function generateSelectedRoomsDisplay() {
+  const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
+  const selectedCottages = bookingState.selectedCottages || [];
+  
+  let html = '<div class="form-section"><h3>Selected Accommodations</h3><div class="selected-items-grid">';
+  
+  if (selectedRooms.length === 0 && selectedCottages.length === 0) {
+    html += '<div class="empty-selected" style="color: var(--color-muted);">No items selected yet.</div>';
+  }
+  
+  // Add room cards
+  selectedRooms.forEach(roomId => {
+    html += `
+      <div class="selected-item-card">
+        <div class="selected-item-icon">🏨</div>
+        <div class="selected-item-info">
+          <strong>${roomId}</strong>
+          <span>Standard Room</span>
+        </div>
+        <button type="button" class="btn small" data-remove-room="${roomId}" onclick="removeSelectedRoom('${roomId}')">Remove</button>
+      </div>
+    `;
+  });
+  
+  // Add cottage cards
+  selectedCottages.forEach(cottageId => {
+    html += `
+      <div class="selected-item-card">
+        <div class="selected-item-icon">🏡</div>
+        <div class="selected-item-info">
+          <strong>${cottageId}</strong>
+          <span>Cottage</span>
+        </div>
+        <button type="button" class="btn small" data-remove-cottage="${cottageId}" onclick="removeSelectedCottage('${cottageId}')">Remove</button>
+      </div>
+    `;
+  });
+  
+  // Manage button
+  html += '</div><div style="margin-top:12px;"><button type="button" class="btn" onclick="openItemsManager()">Add/Remove Items</button></div></div>';
+  return html;
+}
+
+// Generate selected cottages display (for cottage bookings)
+function generateSelectedCottagesDisplay() {
+  const selectedCottages = bookingFormState.selectedCottagesFromFlow || [];
+  
+  let html = '<div class="form-section"><h3>Selected Cottages</h3><div class="selected-items-grid">';
+  
+  if (selectedCottages.length === 0) {
+    html += '<div class="empty-selected" style="color: var(--color-muted);">No cottages selected yet.</div>';
+  }
+  
+  // Add cottage cards
+  selectedCottages.forEach(cottageId => {
+    html += `
+      <div class="selected-item-card">
+        <div class="selected-item-icon">🏡</div>
+        <div class="selected-item-info">
+          <strong>${cottageId}</strong>
+          <span>Cottage</span>
+        </div>
+        <button type="button" class="btn small" data-remove-cottage="${cottageId}" onclick="removeCottageFromBooking('${cottageId}')">Remove</button>
+      </div>
+    `;
+  });
+  
+  // Manage button to add more cottages
+  html += '</div><div style="margin-top:12px;"><button type="button" class="btn" onclick="openCottageItemsManager()">Add/Remove Cottages</button></div></div>';
+  return html;
+}
+
+// Update room availability when dates change
+function updateRoomAvailability() {
+  const roomCheckboxes = document.getElementById('room-checkboxes');
+  if (roomCheckboxes) {
+    roomCheckboxes.innerHTML = generateRoomCheckboxes();
+  }
+}
+
+// Update total guests display
+function updateTotalGuests() {
+  const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
+  let totalAdults = 0;
+  let totalChildren = 0;
+  
+  selectedRooms.forEach(roomId => {
+    const adultsInput = document.getElementById(`${roomId}-adults`);
+    const childrenInput = document.getElementById(`${roomId}-children`);
+    
+    if (adultsInput) totalAdults += parseInt(adultsInput.value) || 0;
+    if (childrenInput) totalChildren += parseInt(childrenInput.value) || 0;
+  });
+  
+  const display = document.getElementById('total-guests-display');
+  if (display) {
+    display.innerHTML = `<strong>Total: ${totalAdults} adults, ${totalChildren} children across ${selectedRooms.length} room${selectedRooms.length > 1 ? 's' : ''}</strong>`;
+  }
+}
+
+// Make updateTotalGuests globally available
+window.updateTotalGuests = updateTotalGuests;
+
+// Remove selected items handlers
+window.removeSelectedRoom = function(roomId) {
+  // Remove from selectedRoomsFromFlow
+  bookingFormState.selectedRoomsFromFlow = (bookingFormState.selectedRoomsFromFlow || []).filter(id => id !== roomId);
+  // Rerender content
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+};
+
+window.removeSelectedCottage = function(cottageId) {
+  bookingState.removeCottage(cottageId);
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+};
+
+// Remove cottage from cottage booking flow
+window.removeCottageFromBooking = function(cottageId) {
+  // Remove from selectedCottagesFromFlow
+  bookingFormState.selectedCottagesFromFlow = (bookingFormState.selectedCottagesFromFlow || []).filter(id => id !== cottageId);
+  // Rerender content
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+  }
+};
+
+// Open inline items manager
+window.openItemsManager = async function() {
+  const container = document.querySelector('.booking-form-content');
+  if (!container) return;
+  // Build panel
+  const panelId = 'items-manager-panel';
+  let panel = document.getElementById(panelId);
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = panelId;
+    panel.style.position = 'relative';
+    panel.innerHTML = `
+      <div class="form-section" id="items-manager" style="border:1px solid var(--border); border-radius:8px; padding:12px; background:#fafafa;">
+        <h3>Manage Items</h3>
+        <div id="items-manager-grid">Loading...</div>
+      </div>
+    `;
+    container.appendChild(panel);
+  }
+  // Render available items by category
+  await renderItemsManagerGrid();
+  // outside click closes
+  function handleOutside(e){
+    const box = document.getElementById('items-manager');
+    if (box && !box.contains(e.target)) {
+      panel.remove();
+      document.removeEventListener('click', handleOutside, true);
+    }
+  }
+  setTimeout(() => document.addEventListener('click', handleOutside, true), 0);
+};
+
+async function renderItemsManagerGrid() {
+  const grid = document.getElementById('items-manager-grid');
+  if (!grid) return;
+  const category = bookingFormState.category; // 'rooms' | 'cottages'
+  const dates = bookingFormState.preFillDates || {};
+  try {
+    if (category === 'rooms') {
+      const checkin = dates.checkin;
+      const checkout = dates.checkout;
+      const rooms = await bookingState.getAvailableRooms(checkin, checkout);
+      grid.innerHTML = `
+        <div class="room-selection-grid" style="grid-template-columns: repeat(4, 1fr);">${rooms.map(r => `
+          <div class="room-selection-card ${ (bookingFormState.selectedRoomsFromFlow||[]).includes(r) ? 'selected' : '' }" data-room-id="${r}" onclick="toggleManagerRoom('${r}')">
+            <div class="room-card-image"><img src="images/kina1.jpg" alt="${r}"><div class="room-selection-indicator"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"M20 6L9 17l-5-5\"></path></svg></div></div>
+            <div class="room-card-content"><h4>${r}</h4><div class="room-price">₱5,500/night</div><button class="room-select-btn">${(bookingFormState.selectedRoomsFromFlow||[]).includes(r) ? 'Selected' : 'Select'}</button></div>
+          </div>`).join('')}
+        </div>`;
+    } else if (category === 'cottages') {
+      const visit = dates.date;
+      const { checkAvailability } = await import('../utils/api.js');
+      const result = await checkAvailability(1, visit, visit, 'cottages');
+      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+      // In manager, show all with unavailable/selected states (same as inline)
+      const all = ['Standard Cottage','Garden Cottage','Family Cottage'];
+      grid.innerHTML = `
+        <div class="room-selection-grid" style="grid-template-columns: repeat(3, 1fr);">${all.map(c => {
+          const isAvailable = available.includes(c);
+          const isSelected = (bookingState.selectedCottages||[]).includes(c);
+          return `
+          <div class="room-selection-card ${ isSelected ? 'selected' : '' } ${isAvailable ? '' : 'unavailable'}" data-cottage-id="${c}" onclick="toggleManagerCottage('${c}')">
+            <div class="room-card-image"><img src="images/cottage_1.JPG" alt="${c}"><div class="room-selection-indicator"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"M20 6L9 17l-5-5\"></path></svg></div></div>
+            <div class="room-card-content"><h4>${c}</h4><div class="room-price">${getCottageInfo(c).price}</div><button class="room-select-btn" ${isAvailable ? '' : 'disabled'}>${isSelected ? 'Selected' : (isAvailable ? 'Select' : 'Unavailable')}</button></div>
+          </div>`}).join('')}
+        </div>`;
+    }
+  } catch (e) {
+    grid.innerHTML = '<div style="padding:12px; color:#c00;">Failed to load availability.</div>';
+  }
+}
+
+window.toggleManagerRoom = function(roomId) {
+  const list = bookingFormState.selectedRoomsFromFlow || [];
+  const idx = list.indexOf(roomId);
+  if (idx >= 0) list.splice(idx, 1); else list.push(roomId);
+  bookingFormState.selectedRoomsFromFlow = list;
+  renderItemsManagerGrid();
+};
+
+window.toggleManagerCottage = function(cottageId) {
+  // Single-per-type toggle
+  if ((bookingState.selectedCottages||[]).includes(cottageId)) {
+    bookingState.removeCottage(cottageId);
+  } else {
+    // Allow adding if not already selected; we keep list unique
+    bookingState.addCottage(cottageId);
+  }
+  renderItemsManagerGrid();
+};
+
+// Open cottage items manager (for cottage-only bookings)
+window.openCottageItemsManager = async function() {
+  const container = document.querySelector('.booking-form-content');
+  if (!container) return;
+  // Build panel
+  const panelId = 'cottage-items-manager-panel';
+  let panel = document.getElementById(panelId);
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = panelId;
+    panel.style.position = 'relative';
+    panel.innerHTML = `
+      <div class="form-section" id="cottage-items-manager" style="border:1px solid var(--border); border-radius:8px; padding:12px; background:#fafafa;">
+        <h3>Add/Remove Cottages</h3>
+        <div id="cottage-items-manager-grid">Loading...</div>
+      </div>
+    `;
+    container.appendChild(panel);
+  }
+  // Render available cottages
+  await renderCottageItemsManagerGrid();
+  // outside click closes
+  function handleOutside(e){
+    const box = document.getElementById('cottage-items-manager');
+    if (box && !box.contains(e.target)) {
+      // Update the form display when closing
+      const formContent = document.querySelector('.booking-form-content');
+      if (formContent) {
+        formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+        initializeForm();
+      }
+      panel.remove();
+      document.removeEventListener('click', handleOutside, true);
+    }
+  }
+  setTimeout(() => document.addEventListener('click', handleOutside, true), 0);
+};
+
+async function renderCottageItemsManagerGrid() {
+  const grid = document.getElementById('cottage-items-manager-grid');
+  if (!grid) return;
+  const dates = bookingFormState.preFillDates || {};
+  const visitDate = dates.date;
+  
+  try {
+    // Get available cottages for the visit date
+    const availableCottages = await bookingState.getAvailableCottages(visitDate);
+    
+    grid.innerHTML = `
+      <div class="room-selection-grid" style="grid-template-columns: repeat(3, 1fr);">
+        ${availableCottages.map(cottageId => {
+          const isSelected = (bookingFormState.selectedCottagesFromFlow||[]).includes(cottageId);
+          const imageUrl = cottageId.includes('Garden') ? 'images/cottage_2.JPG' : (cottageId.includes('Family') ? 'images/kina1.jpg' : 'images/cottage_1.JPG');
+          const price = cottageId.includes('Garden') ? '₱7,500/day' : (cottageId.includes('Family') ? '₱10,200/day' : '₱9,500/day');
+          
+          return `
+            <div class="room-selection-card ${isSelected ? 'selected' : ''}" data-cottage-id="${cottageId}" onclick="toggleCottageInManager('${cottageId}')">
+              <div class="room-card-image">
+                <img src="${imageUrl}" alt="${cottageId}">
+                <div class="room-selection-indicator">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path d="M20 6L9 17l-5-5"></path>
+                  </svg>
+                </div>
+              </div>
+              <div class="room-card-content">
+                <h4>${cottageId}</h4>
+                <div class="room-price">${price}</div>
+                <button class="room-select-btn">${isSelected ? 'Selected' : 'Select'}</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } catch (e) {
+    console.error('[Cottage Manager] Error loading cottages:', e);
+    grid.innerHTML = '<div style="padding:12px; color:#c00;">Failed to load available cottages.</div>';
+  }
+}
+
+window.toggleCottageInManager = function(cottageId) {
+  const list = bookingFormState.selectedCottagesFromFlow || [];
+  const idx = list.indexOf(cottageId);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(cottageId);
+  }
+  bookingFormState.selectedCottagesFromFlow = list;
+  renderCottageItemsManagerGrid();
+};
+
+// Inline grid toggle for cottages
+window.toggleInlineCottage = function(cottageId) {
+  if ((bookingState.selectedCottages||[]).includes(cottageId)) {
+    bookingState.removeCottage(cottageId);
+  } else {
+    bookingState.addCottage(cottageId);
+  }
+  // Re-render inline grid to reflect new state
+  const grid = document.getElementById('inline-cottage-grid');
+  if (grid) {
+    // Trigger full form re-render to keep totals/costs in sync
+    const formContent = document.querySelector('.booking-form-content');
+    if (formContent) {
+      formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+      initializeForm();
+    }
+  }
+};
+
+// Calculate total booking cost
+function calculateTotalCost() {
+  const checkin = bookingFormState.preFillDates?.checkin;
+  const checkout = bookingFormState.preFillDates?.checkout;
+  
+  if (!checkin || !checkout) return null;
+  
+  const nights = Math.ceil((new Date(checkout) - new Date(checkin)) / (1000 * 60 * 60 * 24));
+  
+  // Room costs
+  const roomCost = bookingFormState.selectedRoomsFromFlow?.length * 5500 * nights || 0;
+  
+  // Cottage costs
+  let cottageCosts = 0;
+  // Prefer selected list if present (room add-on flow or single-type cottage)
+  if (Array.isArray(bookingState.selectedCottages) && bookingState.selectedCottages.length > 0) {
+    cottageCosts = bookingState.selectedCottages.map(cottageId => {
+      const cottageInfo = getCottageInfo(cottageId);
+      return parseInt(cottageInfo.price.replace(/[₱,/night]/g, ''));
+    }).reduce((sum, price) => sum + (price * nights), 0);
+  } else {
+    // Cottage standalone flow single cottage (day-use). Cost preview handled separately.
+    const typeEl = document.getElementById('cottage-type');
+    const selectedType = typeEl?.value || '';
+    if (selectedType) {
+      const info = getCottageInfo(selectedType);
+      const priceNum = parseInt(info.price.replace(/[₱,/night]/g, '')) || 0;
+      cottageCosts = priceNum; // single cottage, day-use
+    }
+  }
+  
+  return {
+    roomCost,
+    cottageCost: cottageCosts,
+    nights,
+    total: roomCost + cottageCosts
+  };
+}
+
+// Show cottage selection interface
+async function showCottageSelection() {
+  // Set flag to indicate we're navigating to cottage selection
+  bookingFormState.returningFromCottage = false;
+  
+  // SAVE FORM VALUES FIRST before replacing HTML
+  const form = document.getElementById('booking-form');
+  if (form) {
+    bookingFormState.savedFormData = {
+      guestName: document.getElementById('guest-name')?.value || '',
+      email: document.getElementById('email')?.value || '',
+      contact: document.getElementById('contact')?.value || '',
+      paymentMode: document.getElementById('payment-mode')?.value || '',
+      agreement: document.getElementById('agreement')?.checked || false
+    };
+    
+    // Save per-room guest info
+    const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
+    selectedRooms.forEach(roomId => {
+      const guestName = document.getElementById(`${roomId}-guest-name`)?.value;
+      const adults = document.getElementById(`${roomId}-adults`)?.value;
+      const children = document.getElementById(`${roomId}-children`)?.value;
+      
+      if (guestName !== undefined) bookingFormState.savedFormData[`${roomId}-guest-name`] = guestName || '';
+      if (adults !== undefined) bookingFormState.savedFormData[`${roomId}-adults`] = adults || '1';
+      if (children !== undefined) bookingFormState.savedFormData[`${roomId}-children`] = children || '0';
+    });
+    
+    console.log('[showCottageSelection] Saved form values before cottage view:', bookingFormState.savedFormData);
+  }
+  
+  // Get dates from booking state
+  const checkin = bookingFormState.preFillDates?.checkin;
+  const checkout = bookingFormState.preFillDates?.checkout;
+  
+  if (!checkin || !checkout) {
+    alert('Please select dates first');
+    return;
+  }
+  
+  // Get available cottages from database
+  console.log('Checking cottage availability for dates:', checkin, 'to', checkout);
+  
+  // Get available cottages using database checks
+  const availableCottages = await getAvailableCottagesFromDatabase(checkin, checkout);
+  
+  console.log('Available cottages:', availableCottages);
+  
+  // Replace booking modal content with cottage selection view
+  const modalContent = document.querySelector('.booking-form-content');
+  if (modalContent) {
+    modalContent.innerHTML = generateCottageSelectionView(availableCottages, checkin, checkout);
+    initializeCottageSelectionHandlers();
+  }
+}
+
+// Get available cottages from database
+async function getAvailableCottagesFromDatabase(checkin, checkout) {
+  try {
+    // For now, return all cottages (since we don't have booking data yet)
+    // This will be filtered once bookings start being created
+    const allCottages = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+    
+    // Check availability for each cottage
+    const availableCottages = [];
+    
+    for (const cottageId of allCottages) {
+      // Check if cottage is available for the date range
+      const isAvailable = await checkCottageAvailabilityInDatabase(cottageId, checkin, checkout);
+      if (isAvailable) {
+        availableCottages.push(cottageId);
+      }
+    }
+    
+    return availableCottages.length > 0 ? availableCottages : allCottages; // Fallback to all if DB check fails
+  } catch (error) {
+    console.error('Error getting available cottages:', error);
+    // Fallback to showing all cottages
+    return ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+  }
+}
+
+// Check if a specific cottage is available in the database
+async function checkCottageAvailabilityInDatabase(cottageId, checkin, checkout) {
+  try {
+    // TODO: Implement actual database check once bookings are being created
+    // For now, return true (available)
+    return true;
+  } catch (error) {
+    console.error('Error checking cottage availability:', error);
+    // Default to available on error
+    return true;
+  }
+}
+
+// Generate cottage selection view HTML
+function generateCottageSelectionView(availableCottages, checkin, checkout) {
+  if (availableCottages.length === 0) {
+    return `
+      <div class="cottage-selection-view">
+        <button type="button" class="back-to-booking-btn" onclick="showBookingForm()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+          Back to Booking
+        </button>
+        
+        <div class="no-cottages-available">
+          <h3>No Cottages Available</h3>
+          <p>No cottages are available for the selected dates (${checkin} to ${checkout}).</p>
+          <button type="button" class="btn" onclick="showBookingForm()">Return to Booking</button>
+        </div>
+      </div>
+    `;
+  }
+  
+  return `
+    <div class="cottage-selection-view">
+      <button type="button" class="back-to-booking-btn" onclick="showBookingForm()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+        Back to Booking
+      </button>
+      
+      <div class="cottage-selection-header">
+        <h3>Select Cottages</h3>
+        <p>Available for ${checkin} to ${checkout}</p>
+      </div>
+      
+      <div class="cottage-selection-grid">
+        ${availableCottages.map(cottageId => {
+          const cottageInfo = getCottageInfo(cottageId);
+          return `
+            <div class="cottage-selection-card ${bookingState.selectedCottages.includes(cottageId) ? 'selected' : ''}" 
+                 data-cottage-id="${cottageId}"
+                 onclick="toggleCottageSelection('${cottageId}')">
+              <div class="cottage-card-image">
+                <img src="${cottageInfo.image}" alt="${cottageId}" loading="lazy">
+                <div class="cottage-selection-indicator">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path d="M20 6L9 17l-5-5"></path>
+                  </svg>
+                </div>
+              </div>
+              <div class="cottage-card-content">
+                <h4>${cottageId}</h4>
+                <p class="cottage-price">${cottageInfo.price}</p>
+                <p class="cottage-capacity">Up to ${cottageInfo.capacity} guests</p>
+                <button class="cottage-select-btn">${bookingState.selectedCottages.includes(cottageId) ? 'Selected' : 'Select Cottage'}</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      
+      ${bookingState.selectedCottages.length > 0 ? `
+        <div class="cottage-selection-summary">
+          <div>
+            <p><strong>${bookingState.selectedCottages.length} cottage${bookingState.selectedCottages.length > 1 ? 's' : ''} selected</strong></p>
+            ${(() => {
+              const costs = calculateTotalCost();
+              if (costs && costs.cottageCost > 0) {
+                return `<p class="cost-preview">Additional: ₱${costs.cottageCost.toLocaleString()}</p>`;
+              }
+              return '';
+            })()}
+          </div>
+          <button type="button" class="btn primary" onclick="addSelectedCottagesToBooking()">
+            Add to Booking
+          </button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// Get cottage information
+function getCottageInfo(cottageId) {
+  const cottageData = {
+    'Standard Cottage': {
+      image: 'images/cottage_1.JPG',
+      price: '₱9,500/night',
+      capacity: 6
+    },
+    'Garden Cottage': {
+      image: 'images/cottage_2.JPG',
+      price: '₱7,500/night',
+      capacity: 4
+    },
+    'Family Cottage': {
+      image: 'images/kina1.jpg',
+      price: '₱10,200/night',
+      capacity: 7
+    }
+  };
+  
+  return cottageData[cottageId] || { image: 'images/kina1.jpg', price: '₱9,500/night', capacity: 6 };
+}
+
+// Update bookingState.selectedCottages and UI price/capacity previews from form inputs
+function updateCottageDerivedState() {
+  const typeEl = null; // no dropdown; selection via grid
+  const adultsEl = document.getElementById('cottage-adults');
+  const childrenEl = document.getElementById('cottage-children');
+  
+  const selectedType = (bookingState.selectedCottages && bookingState.selectedCottages[0]) || '';
+  const adults = Math.max(0, parseInt(adultsEl?.value || '0'));
+  const children = Math.max(0, parseInt(childrenEl?.value || '0'));
+  
+  // DO NOT clear bookingState.selectedCottages here
+  // It's managed by the cottage selection flow, not the form
+  // This function should only update UI previews based on existing selections
+  
+  // Capacity note
+  const noteEl = document.getElementById('cottage-capacity-note');
+  if (noteEl && selectedType) {
+    const cap = getCottageInfo(selectedType).capacity || 0;
+    const maxGuests = cap;
+    noteEl.textContent = `Capacity: up to ${maxGuests} guests (${cap} per cottage)`;
+  } else if (noteEl) {
+    noteEl.textContent = '';
+  }
+  
+  // Price preview
+  const priceEl = document.getElementById('cottage-price-preview');
+  if (priceEl && selectedType) {
+    const info = getCottageInfo(selectedType);
+    const priceNum = parseInt(info.price.replace(/[₱,/night]/g, '')) || 0;
+    const total = priceNum;
+    priceEl.textContent = `Estimated: ₱${total.toLocaleString()} (${selectedType})`;
+  } else if (priceEl) {
+    priceEl.textContent = '';
+  }
+  
+  // Basic capacity validation visual (non-blocking here)
+  const totalGuests = adults + children;
+  if (noteEl && selectedType) {
+    const cap = getCottageInfo(selectedType).capacity || 0;
+    const maxGuests = cap;
+    noteEl.style.color = totalGuests > maxGuests ? '#d32f2f' : 'var(--color-text-secondary)';
+  }
+}
+
+// Initialize cottage selection handlers
+function initializeCottageSelectionHandlers() {
+  // Event handlers are attached via onclick in the generated HTML
+}
+
+// Toggle cottage selection
+function toggleCottageSelection(cottageId) {
+  if (bookingState.selectedCottages.includes(cottageId)) {
+    bookingState.removeCottage(cottageId);
+  } else {
+    bookingState.addCottage(cottageId);
+  }
+  
+  console.log('[toggleCottageSelection] Updated cottages:', bookingState.selectedCottages);
+  
+  // Update visual state
+  const card = document.querySelector(`.cottage-selection-card[data-cottage-id="${cottageId}"]`);
+  if (card) {
+    if (bookingState.selectedCottages.includes(cottageId)) {
+      card.classList.add('selected');
+      card.querySelector('.cottage-select-btn').textContent = 'Selected';
+    } else {
+      card.classList.remove('selected');
+      card.querySelector('.cottage-select-btn').textContent = 'Select Cottage';
+    }
+  }
+  
+  // Update summary section
+  updateCottageSelectionSummary();
+}
+
+// Update cottage selection summary
+function updateCottageSelectionSummary() {
+  const summarySection = document.querySelector('.cottage-selection-summary');
+  if (bookingState.selectedCottages.length > 0) {
+    if (!summarySection) {
+      // Add summary section
+      const view = document.querySelector('.cottage-selection-view');
+      const summaryHTML = `
+        <div class="cottage-selection-summary">
+          <p><strong>${bookingState.selectedCottages.length} cottage${bookingState.selectedCottages.length > 1 ? 's' : ''} selected</strong></p>
+          <button type="button" class="btn primary" onclick="addSelectedCottagesToBooking()">
+            Add to Booking
+          </button>
+        </div>
+      `;
+      view.insertAdjacentHTML('beforeend', summaryHTML);
+    } else {
+      // Update existing summary
+      summarySection.querySelector('p strong').textContent = `${bookingState.selectedCottages.length} cottage${bookingState.selectedCottages.length > 1 ? 's' : ''} selected`;
+    }
+  } else if (summarySection) {
+    summarySection.remove();
+  }
+}
+
+// Add selected cottages to booking and return to form
+function addSelectedCottagesToBooking() {
+  if (bookingState.selectedCottages.length === 0) {
+    alert('Please select at least one cottage');
+    return;
+  }
+  
+  // Set flag to indicate we're returning from cottage selection
+  bookingFormState.returningFromCottage = true;
+  
+  // Close selection modal if open
+  const modalEl = document.querySelector('.modal');
+  if (modalEl) {
+    modalEl.remove();
+  }
+  // Show booking form again
+  showBookingForm();
+}
+
+// Show booking form (restore original form)
+function showBookingForm() {
+  console.warn('[showBookingForm] Called - preserving form state');
+  
+  const form = document.getElementById('booking-form');
+  
+  // If returning from cottage, skip saving (use existing savedFormData)
+  if (!bookingFormState.returningFromCottage && form) {
+    // Save form values to state BEFORE re-rendering
+    bookingFormState.savedFormData = {
+      guestName: document.getElementById('guest-name')?.value || '',
+      email: document.getElementById('email')?.value || '',
+      contact: document.getElementById('contact')?.value || '',
+      paymentMode: document.getElementById('payment-mode')?.value || '',
+      agreement: document.getElementById('agreement')?.checked || false
+    };
+    
+    // Save per-room guest info
+    const selectedRooms = bookingFormState.selectedRoomsFromFlow || [];
+    selectedRooms.forEach(roomId => {
+      const guestName = document.getElementById(`${roomId}-guest-name`)?.value;
+      const adults = document.getElementById(`${roomId}-adults`)?.value;
+      const children = document.getElementById(`${roomId}-children`)?.value;
+      
+      if (guestName !== undefined) bookingFormState.savedFormData[`${roomId}-guest-name`] = guestName || '';
+      if (adults !== undefined) bookingFormState.savedFormData[`${roomId}-adults`] = adults || '1';
+      if (children !== undefined) bookingFormState.savedFormData[`${roomId}-children`] = children || '0';
+    });
+    
+    console.log('[showBookingForm] Saved to state (from form):', bookingFormState.savedFormData);
+  } else if (bookingFormState.returningFromCottage) {
+    console.log('[showBookingForm] Returning from cottage - using existing saved state:', bookingFormState.savedFormData);
+  }
+  
+  // Re-render form
+  const formContent = document.querySelector('.booking-form-content');
+  if (formContent && bookingFormState.reservationType) {
+    formContent.innerHTML = renderFormFields(bookingFormState.reservationType);
+    initializeForm();
+    
+    // Restore values from state
+    if (bookingFormState.savedFormData) {
+      Object.entries(bookingFormState.savedFormData).forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input) {
+          if (input.type === 'checkbox') {
+            input.checked = value;
+          } else {
+            input.value = value;
+          }
+          // Trigger change event
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+      console.log('[showBookingForm] Form values restored from state');
+    }
+    
+    // Reset the flag after restoring
+    bookingFormState.returningFromCottage = false;
+  }
+}
+
+// Make functions globally available
+window.toggleAddCottage = showCottageSelection;
+window.showCottageSelection = showCottageSelection;
+window.toggleCottageSelection = toggleCottageSelection;
+window.addSelectedCottagesToBooking = addSelectedCottagesToBooking;
+window.showBookingForm = showBookingForm;
+
+// Toggle add room to cottage booking
+function toggleAddRoom() {
+  bookingFormState.addRoomToCottage = !bookingFormState.addRoomToCottage;
+  const field = document.getElementById('room-overnight-field');
+  const button = document.querySelector('.add-option-toggle');
+  
+  if (bookingFormState.addRoomToCottage) {
+    field.style.display = 'block';
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Remove Room from Booking
+    `;
+  } else {
+    field.style.display = 'none';
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Add Room for Overnight Stay
+    `;
+  }
+}
+
+// Initialize form with event listeners
+function initializeForm() {
+  // Set minimum date to today
+    const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+    const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth()+1).padStart(2,'0')}-${String(todayDate.getDate()).padStart(2,'0')}`;
+  document.querySelectorAll('input[type="date"]').forEach(input => {
+    input.min = today;
+  });
+  
+  // Pre-fill main booker info from logged-in user
+  const authUser = localStorage.getItem('auth_user');
+  if (authUser) {
+    try {
+      const user = JSON.parse(authUser);
+      const nameInput = document.getElementById('guest-name');
+      const emailInput = document.getElementById('email');
+      
+      if (nameInput && !nameInput.value && user.firstName && user.lastName) {
+        nameInput.value = `${user.firstName} ${user.lastName}`;
+      }
+      if (emailInput && !emailInput.value && user.email) {
+        emailInput.value = user.email;
+      }
+    } catch (e) {
+      console.error('Failed to parse user data:', e);
+    }
+  }
+  
+  // Pre-fill dates if provided
+  if (bookingFormState.preFillDates) {
+    if (bookingFormState.preFillDates.checkin && bookingFormState.preFillDates.checkout) {
+      // Room booking - pre-fill check-in and check-out
+      const checkinInput = document.getElementById('checkin-date');
+      const checkoutInput = document.getElementById('checkout-date');
+      if (checkinInput) {
+        checkinInput.value = bookingFormState.preFillDates.checkin;
+        console.log('Pre-filled checkin date:', checkinInput.value);
+      }
+      if (checkoutInput) {
+        checkoutInput.value = bookingFormState.preFillDates.checkout;
+        console.log('Pre-filled checkout date:', checkoutInput.value);
+      }
+    } else if (bookingFormState.preFillDates.date) {
+      // Cottage or function hall - pre-fill single date
+      const dateInput = document.getElementById('cottage-date') || document.getElementById('event-date');
+      if (dateInput) dateInput.value = bookingFormState.preFillDates.date;
+    }
+  }
+  
+  // No time/duration handling for cottages (day-use only)
+  
+  // Auto-calculate nights for room booking
+  const checkinInput = document.getElementById('checkin-date');
+  const checkoutInput = document.getElementById('checkout-date');
+  const nightsDisplay = document.getElementById('nights-display');
+  
+  if (checkinInput && checkoutInput && nightsDisplay) {
+    const calculateNights = () => {
+      const checkin = new Date(checkinInput.value);
+      const checkout = new Date(checkoutInput.value);
+      
+      if (checkin && checkout && checkout > checkin) {
+        const diffTime = Math.abs(checkout - checkin);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        nightsDisplay.textContent = diffDays;
+        // Update room availability when dates change
+        updateRoomAvailability();
+      } else {
+        nightsDisplay.textContent = '0';
+      }
+    };
+    
+    checkinInput.addEventListener('change', calculateNights);
+    checkoutInput.addEventListener('change', calculateNights);
+    
+    // Calculate nights on initial load if dates are pre-filled
+    if (checkinInput.value && checkoutInput.value) {
+      calculateNights();
+    }
+  }
+  
+  // Handle room selection based on number of rooms
+  const numRoomsSelect = document.getElementById('num-rooms');
+  
+  if (numRoomsSelect) {
+    numRoomsSelect.addEventListener('change', (e) => {
+      const numRooms = parseInt(e.target.value);
+      
+      // Show instruction
+      const instruction = document.createElement('div');
+      instruction.className = 'room-selection-instruction';
+      instruction.textContent = `Please select ${numRooms} room${numRooms > 1 ? 's' : ''}`;
+      
+      const existingInstruction = document.querySelector('.room-selection-instruction');
+      if (existingInstruction) {
+        existingInstruction.remove();
+      }
+      
+      document.getElementById('room-selection-field').appendChild(instruction);
+    });
+  }
+  
+  // Real-time validation
+  document.querySelectorAll('.form-input, .form-select').forEach(input => {
+    input.addEventListener('blur', () => validateField(input));
+    input.addEventListener('input', () => clearFieldError(input));
+  });
+  
+  // Update total guests display if coming from room selection flow
+  if (bookingFormState.selectedRoomsFromFlow && bookingFormState.selectedRoomsFromFlow.length > 0) {
+    updateTotalGuests();
+  }
+  
+  // Load terms and conditions
+  loadTermsAndConditions();
+
+  // Cottage form dynamic handlers
+  const cottageTypeEl = document.getElementById('cottage-type');
+  const cottageAdultsEl = document.getElementById('cottage-adults');
+  const cottageChildrenEl = document.getElementById('cottage-children');
+  if (cottageTypeEl || cottageAdultsEl || cottageChildrenEl) {
+    [cottageTypeEl, cottageAdultsEl, cottageChildrenEl].forEach(el => {
+      if (el) el.addEventListener('change', updateCottageDerivedState);
+      if (el) el.addEventListener('input', updateCottageDerivedState);
+    });
+    // Initialize preview
+    updateCottageDerivedState();
+  }
+
+  // Inline cottage grid population (reuse room card UI)
+  if (bookingFormState.reservationType === 'cottage') {
+    const grid = document.getElementById('inline-cottage-grid');
+    const visit = bookingFormState.preFillDates?.date;
+    if (grid && visit) {
+      (async () => {
+        try {
+          const { checkAvailability } = await import('../utils/api.js');
+          const result = await checkAvailability(1, visit, visit, 'cottages');
+          let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+          const selected = bookingState.selectedCottages || [];
+          // For inline UI, show all three with selected state; disable ones not in available list
+          const all = ['Standard Cottage','Garden Cottage','Family Cottage'];
+          grid.innerHTML = all.map(c => {
+            const isAvailable = available.includes(c);
+            const isSelected = selected.includes(c);
+            return `
+              <div class="room-selection-card ${isSelected ? 'selected' : ''} ${isAvailable ? '' : 'unavailable'}" data-cottage-id="${c}" onclick="toggleInlineCottage('${c}')">
+                <div class="room-card-image">
+                  <img src="${getCottageInfo(c).image}" alt="${c}">
+                  <div class="room-selection-indicator"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"M20 6L9 17l-5-5\"></path></svg></div>
+                </div>
+                <div class="room-card-content">
+                  <h4>${c}</h4>
+                  <div class="room-price">${getCottageInfo(c).price}</div>
+                  <button class="room-select-btn" ${isAvailable ? '' : 'disabled'}>${isSelected ? 'Selected' : (isAvailable ? 'Select' : 'Unavailable')}</button>
+                </div>
+              </div>`;
+          }).join('');
+        } catch (e) {
+          grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; color:#c00;">Failed to load cottages.</div>';
+        }
+      })();
+    }
+  }
+}
+
+// Toggle terms expansion
+window.toggleTermsExpansion = function() {
+  const termsContent = document.getElementById('terms-content');
+  const toggleBtn = document.getElementById('terms-toggle-btn');
+  
+  if (termsContent && toggleBtn) {
+    const isCollapsed = termsContent.classList.contains('collapsed');
+    
+    if (isCollapsed) {
+      termsContent.classList.remove('collapsed');
+      toggleBtn.classList.add('expanded');
+    } else {
+      termsContent.classList.add('collapsed');
+      toggleBtn.classList.remove('expanded');
+    }
+  }
+};
+
+// Fetch and display terms from API or use fallback
+async function loadTermsAndConditions() {
+  const termsInner = document.getElementById('terms-inner');
+  if (!termsInner) return;
+
+  // Check cache first
+  if (window.__bookingTermsCache) {
+    termsInner.innerHTML = window.__bookingTermsCache;
+    return;
+  }
+
+  // If coming from a cottage card selection, preselect that cottage in the modal
+  if (bookingFormState.category === 'cottages' && window.preselectedCottageType) {
+    const pre = String(window.preselectedCottageType);
+    if (!Array.isArray(bookingState.selectedCottages) || bookingState.selectedCottages.length === 0) {
+      bookingState.selectedCottages = [pre];
+    } else if (!bookingState.selectedCottages.includes(pre)) {
+      bookingState.selectedCottages.push(pre);
+    }
+    try { delete window.preselectedCottageType; } catch(_){}
+  }
+
+  try {
+    // Try to fetch from API
+    const { request } = await import('../utils/api.js');
+    const data = await request('/settings/booking_terms');
+    if (data && (data.data?.content || data.content)) {
+      const content = data.data?.content || data.content;
+      window.__bookingTermsCache = content;
+      termsInner.innerHTML = content;
+      return;
+    }
+  } catch (error) {
+    console.log('API terms not available, using fallback:', error.message);
+  }
+
+  // Fallback: Use static booking terms
+  const fallbackTerms = `
+    <div style="line-height: 1.6; color: #333;">
+      <h3 style="margin-top: 0; color: #667eea; font-size: 18px;">Reservations and Payment</h3>
+      <p><strong>Booking Process:</strong> All reservations are subject to availability and confirmation. A valid payment method is required to secure your booking.</p>
+      <p><strong>Payment Terms:</strong> Full payment is required at the time of booking. We accept major credit cards, bank transfers, and other approved payment methods. All prices are in Philippine Peso (PHP) and include applicable taxes.</p>
+      
+      <h3 style="margin-top: 24px; color: #667eea; font-size: 18px;">Cancellation and Refund Policy</h3>
+      <ul style="margin: 12px 0; padding-left: 20px;">
+        <li><strong>7 days or more before arrival:</strong> Full refund</li>
+        <li><strong>3-6 days before arrival:</strong> 50% refund</li>
+        <li><strong>Less than 3 days before arrival:</strong> No refund</li>
+        <li><strong>No-shows:</strong> Full amount charged, no refund</li>
+      </ul>
+      
+      <h3 style="margin-top: 24px; color: #667eea; font-size: 18px;">Guest Responsibilities</h3>
+      <ul style="margin: 12px 0; padding-left: 20px;">
+        <li>Provide accurate information during booking and check-in</li>
+        <li>Follow resort policies, safety guidelines, and local regulations</li>
+        <li>Respect other guests, staff, and resort property</li>
+        <li>Report any damages, safety concerns, or issues immediately</li>
+      </ul>
+      
+      <p style="margin-top: 24px; font-size: 14px; color: #666; font-style: italic;">
+        <strong>Note:</strong> For complete Terms & Conditions, please visit our 
+        <a href="#/terms" style="color: #667eea; text-decoration: underline;" target="_blank">Terms & Conditions</a> page.
+      </p>
+    </div>
+  `;
+
+  window.__bookingTermsCache = fallbackTerms;
+  termsInner.innerHTML = fallbackTerms;
+}
+
+// Validate individual field
+function validateField(field) {
+  const value = field.value.trim();
+  const fieldName = field.name;
+  let isValid = true;
+  let errorMessage = '';
+  
+  // Special handling for pre-filled readonly date fields
+  if (field.hasAttribute('readonly') && 
+      (fieldName === 'checkinDate' || fieldName === 'checkoutDate' || fieldName === 'cottageDate' || fieldName === 'eventDate') &&
+      bookingFormState.preFillDates) {
+    // Dates are pre-filled via state, skip validation if empty since they'll be populated via state
+    const isRequired = field.hasAttribute('required') || field.getAttribute('data-required') === 'true';
+    if (!value && isRequired) {
+      console.warn(`Readonly date field ${fieldName} is required but empty. Checking state...`);
+      console.log('bookingFormState.preFillDates:', bookingFormState.preFillDates);
+      // Don't mark as invalid if preFillDates exists - the value will be used from state
+      return true;
+    }
+  }
+  
+  // Required field validation (check both 'required' attribute and 'data-required' for date fields)
+  const isRequired = field.hasAttribute('required') || field.getAttribute('data-required') === 'true';
+  
+  if (isRequired && !value) {
+    // Skip validation for readonly date fields when preFillDates exists
+    const isReadonlyDate = field.hasAttribute('readonly') && 
+                           (fieldName === 'checkinDate' || fieldName === 'checkoutDate' || fieldName === 'cottageDate' || fieldName === 'eventDate') &&
+                           bookingFormState.preFillDates;
+    
+    if (!isReadonlyDate) {
+    isValid = false;
+    errorMessage = 'This field is required';
+    }
+  }
+  
+  // Email validation
+  if (fieldName === 'email' && value) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value)) {
+      isValid = false;
+      errorMessage = 'Please enter a valid email address';
+    }
+  }
+  
+  // Phone validation
+  if (fieldName === 'contact' && value) {
+    const phoneRegex = /^[\+]?[0-9\s\-\(\)]{10,}$/;
+    if (!phoneRegex.test(value)) {
+      isValid = false;
+      errorMessage = 'Please enter a valid phone number';
+    }
+  }
+  
+  // Date validation
+  if (field.type === 'date' && value) {
+    const selectedDate = new Date(value);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (selectedDate < today) {
+      isValid = false;
+      errorMessage = 'Date cannot be in the past';
+    }
+  }
+  
+  // Check-out date validation
+  if (fieldName === 'checkoutDate' && value) {
+    const checkinDate = document.getElementById('checkin-date')?.value;
+    if (checkinDate && value <= checkinDate) {
+      isValid = false;
+      errorMessage = 'Check-out date must be after check-in date';
+    }
+  }
+  
+  // Time validation
+  if (field.type === 'time' && value) {
+    const startTime = document.getElementById('start-time')?.value;
+    const endTime = document.getElementById('end-time')?.value;
+    
+    if (fieldName === 'endTime' && startTime && value <= startTime) {
+      isValid = false;
+      errorMessage = 'End time must be after start time';
+    }
+  }
+  
+  // Number validation
+  if (field.type === 'number' && value) {
+    const min = field.getAttribute('min');
+    if (min && parseInt(value) < parseInt(min)) {
+      isValid = false;
+      errorMessage = `Value must be at least ${min}`;
+    }
+  }
+  
+  // Update field appearance and error message
+  if (isValid) {
+    field.classList.remove('error');
+    clearFieldError(field);
+  } else {
+    field.classList.add('error');
+    showFieldError(field, errorMessage);
+  }
+  
+  return isValid;
+}
+
+// Show field error
+function showFieldError(field, message) {
+  // Handle both element and string field names
+  let fieldId = typeof field === 'string' ? field : (field?.id || field?.name || 'unknown');
+  
+  // Convert name to ID format if using name (hyphens instead of camelCase)
+  if (fieldId.includes('paymentMode') || fieldId.includes('checkinDate') || fieldId.includes('checkoutDate') || fieldId.includes('endTime') || fieldId.includes('startTime')) {
+    // Convert camelCase to kebab-case
+    fieldId = fieldId.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+  }
+  
+  const errorElement = document.getElementById(`${fieldId}-error`);
+  if (errorElement) {
+    errorElement.textContent = message;
+    errorElement.style.display = 'block';
+    console.warn(`Validation error on ${fieldId}: ${message}`);
+  } else {
+    // Fallback: try to find element by name instead
+    console.warn('Error element not found for field:', fieldId, 'Message:', message);
+  }
+}
+
+// Clear field error
+function clearFieldError(field) {
+  // Handle both element and string field names
+  let fieldId = typeof field === 'string' ? field : (field?.id || field?.name || 'unknown');
+  
+  // Convert name to ID format if using name (hyphens instead of camelCase)
+  if (fieldId.includes('paymentMode') || fieldId.includes('checkinDate') || fieldId.includes('checkoutDate') || fieldId.includes('endTime') || fieldId.includes('startTime')) {
+    // Convert camelCase to kebab-case
+    fieldId = fieldId.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+  }
+  
+  const errorElement = document.getElementById(`${fieldId}-error`);
+  if (errorElement) {
+    errorElement.textContent = '';
+    errorElement.style.display = 'none';
+  }
+  
+  if (field && field.classList) {
+  field.classList.remove('error');
+  }
+}
+
+// Validate entire form
+function validateForm() {
+  let isValid = true;
+  console.log('=== Form Validation Details ===');
+  console.log('Reservation type:', bookingFormState.reservationType);
+  
+  // Validate all input fields
+  document.querySelectorAll('.form-input, .form-select').forEach(field => {
+    const fieldValid = validateField(field);
+    if (!fieldValid) {
+      console.error(`Validation failed for field: ${field.id || field.name}`, 
+                   `Value: "${field.value}", Required: ${field.required || 'N/A'}`);
+      isValid = false;
+    } else {
+      console.log(`Validation passed: ${field.id || field.name}`);
+    }
+  });
+  
+  // Validate checkboxes/radio buttons
+  if (bookingFormState.reservationType === 'room') {
+    // If rooms selected from flow, skip checkbox validation
+    if (bookingFormState.selectedRoomsFromFlow?.length > 0) {
+      console.log('Rooms pre-selected from flow:', bookingFormState.selectedRoomsFromFlow);
+    } else {
+    const selectedRooms = document.querySelectorAll('input[name="selectedRooms"]:checked');
+    const numRooms = parseInt(document.getElementById('num-rooms')?.value || '1');
+      
+      console.log(`Room validation: ${selectedRooms.length} selected, ${numRooms} expected`);
+    
+    if (selectedRooms.length !== numRooms) {
+      isValid = false;
+        const numRoomsField = document.getElementById('num-rooms');
+        if (numRoomsField) {
+          showFieldError('num-rooms', `Please select exactly ${numRooms} room${numRooms > 1 ? 's' : ''}`);
+        }
+      }
+    }
+  }
+  
+  if (bookingFormState.reservationType === 'cottage') {
+    const adultsEl = document.getElementById('cottage-adults');
+    const childrenEl = document.getElementById('cottage-children');
+    
+    // Require at least one cottage selected via items manager
+    const selectedCottages = bookingState.selectedCottages || [];
+    if (!selectedCottages.length) {
+      isValid = false;
+      showFieldError('cottage-date', 'Select a cottage type via Add/Remove Items');
+    }
+    
+    // Capacity constraint
+    if (selectedCottages.length) {
+      // Single cottage per type; take first selected for capacity
+      const cap = getCottageInfo(selectedCottages[0]).capacity || 0;
+      const totalGuests = (parseInt(adultsEl?.value || '0') || 0) + (parseInt(childrenEl?.value || '0') || 0);
+      const maxGuests = cap;
+      if (totalGuests < 1) {
+        isValid = false;
+        showFieldError('cottage-adults', 'At least one guest is required');
+      }
+      if (totalGuests > maxGuests) {
+        isValid = false;
+        showFieldError('cottage-children', `Exceeds capacity. Max ${maxGuests} guests for selected cottage`);
+      }
+    }
+  }
+  
+  if (bookingFormState.reservationType === 'function-hall') {
+    const selectedHall = document.querySelector('input[name="selectedHall"]:checked');
+    if (!selectedHall) {
+      isValid = false;
+      showFieldError('hall-selection-error', 'Please select a function hall');
+    }
+  }
+  
+  // Validate agreement checkbox
+  const agreement = document.getElementById('agreement');
+  if (!agreement?.checked) {
+    isValid = false;
+    showFieldError('agreement', 'You must agree to the booking policy');
+  }
+  
+  return isValid;
+}
+
+// Save booking to API (mock or real)
+async function saveBooking(bookingData) {
+  console.log('[Booking] saveBooking called with:', bookingData);
+  
+  try {
+    // Calculate total cost
+    const costs = calculateTotalCost();
+    const totalCost = costs ? costs.total : 0;
+    console.log('[Booking] Calculated total cost:', totalCost);
+
+    // Map reservationType to category for backend storage
+    const categoryMap = {
+      'room': 'rooms',
+      'cottage': 'cottages',
+      'function-hall': 'function-halls'
+    };
+    const category = categoryMap[bookingFormState.reservationType] || 'rooms';
+    
+    // Prepare booking payload
+    const bookingPayload = {
+      packageId: 1, // Standard Room package ID
+      checkIn: bookingData.dates.checkin || bookingData.dates.eventDate || bookingData.dates.date,
+      checkOut: bookingData.dates.checkout || bookingData.dates.eventDate || bookingData.dates.date,
+      guests: bookingData.guests, // Send the full guests object with adults/children
+      totalCost: totalCost,
+      paymentMode: bookingData.payment,
+      perRoomGuests: bookingData.perRoomGuests || [],
+      contactNumber: bookingData.guestInfo.contact,
+      specialRequests: bookingData.selections.specialRequests || '',
+      selectedCottages: category === 'cottages' ? (bookingFormState.selectedCottagesFromFlow || bookingData.selections?.cottages || []) : (bookingState.selectedCottages || []),
+      selectedHall: null, // Function hall selection removed from modal
+      category: category // Store category in booking record
+    };
+    if (category === 'cottages') {
+      bookingPayload.usage_date = bookingData.dates.usage_date || bookingData.dates.date;
+      bookingPayload.duration_type = bookingData.dates.duration_type || bookingData.dates.durationType;
+      if (bookingData.dates.startTime) bookingPayload.start_time = bookingData.dates.startTime;
+      if (bookingData.dates.endTime) bookingPayload.end_time = bookingData.dates.endTime;
+    }
+    
+    // Preview payload shapes per category (UI step only)
+    if (category === 'cottages') {
+      const preview = {
+        category: 'cottages',
+        visit_date: bookingData.dates.usage_date || bookingData.dates.date,
+        selected_cottages: bookingData.selections?.cottages || [],
+        adults: Number(bookingData.guests?.adults || 0),
+        children: Number(bookingData.guests?.children || 0),
+        guest_info: bookingData.guestInfo,
+        payment_mode: bookingData.payment,
+        special_requests: bookingData.selections?.specialRequests || bookingData.specialRequests || '',
+        agreement: bookingData.agreement === true
+      };
+      console.log('[UI Preview] Cottage payload shape:', preview);
+    } else if (category === 'function-halls') {
+      const preview = {
+        category: 'function-hall',
+        event_type: bookingData.selections?.eventType,
+        event_date: bookingData.dates?.eventDate,
+        start_time: bookingData.dates?.startTime,
+        end_time: bookingData.dates?.endTime,
+        selected_hall: bookingData.selections?.hall,
+        guest_count: Number(bookingData.guests?.total || 0),
+        catering: bookingData.selections?.catering || false,
+        setup_details: bookingData.selections?.setupDetails || '',
+        special_requests: bookingData.selections?.specialRequests || '',
+        guest_info: bookingData.guestInfo,
+        payment_mode: bookingData.payment,
+        agreement: bookingData.agreement === true
+      };
+      console.log('[UI Preview] Function Hall payload shape:', preview);
+    }
+    console.log('[Booking] Booking payload:', JSON.stringify(bookingPayload, null, 2));
+
+    // Use service abstraction
+    const { createBooking } = await import('../services/bookingsService.js');
+    const created = await createBooking(bookingPayload);
+    return created;
+  } catch (error) {
+    console.error('[Booking] Save booking error:', error);
+    console.error('[Booking] Error stack:', error.stack);
+    
+    // Provide user-friendly error message
+    if (error.message.includes('backend server') || error.message === 'Failed to fetch') {
+      throw new Error('Backend server is not running. Please start the server with "npm start" in the server directory and try again.');
+    }
+    
+    throw error;
+  }
+}
+
+// Update existing booking
+async function updateExistingBooking(bookingId, bookingData) {
+  console.log('[BookingModal] updateExistingBooking called');
+  console.log('[BookingModal] Update parameters:', { bookingId, bookingData });
+  
+  try {
+    const costs = calculateTotalCost();
+    const totalCost = costs ? costs.total : 0;
+    console.log('[Booking] Calculated total cost:', totalCost);
+
+    // Map reservationType to category for backend storage
+    const categoryMap = {
+      'room': 'rooms',
+      'cottage': 'cottages',
+      'function-hall': 'function-halls'
+    };
+    const category = categoryMap[bookingFormState.reservationType] || 'rooms';
+    
+    const bookingPayload = {
+      packageId: 1,
+      checkIn: bookingData.dates.checkin || bookingData.dates.eventDate || bookingData.dates.date,
+      checkOut: bookingData.dates.checkout || bookingData.dates.eventDate || bookingData.dates.date,
+      guests: bookingData.guests,
+      totalCost: totalCost,
+      paymentMode: bookingData.payment,
+      perRoomGuests: bookingData.perRoomGuests || [],
+      contactNumber: bookingData.guestInfo.contact,
+      specialRequests: bookingData.selections.specialRequests || '',
+      selectedCottages: bookingState.selectedCottages || [],
+      selectedHall: null, // Function hall selection removed from modal
+      category: category // Store category in booking record
+    };
+    if (category === 'cottages') {
+      bookingPayload.usage_date = bookingData.dates.usage_date || bookingData.dates.date;
+      bookingPayload.duration_type = bookingData.dates.duration_type || bookingData.dates.durationType;
+      if (bookingData.dates.startTime) bookingPayload.start_time = bookingData.dates.startTime;
+      if (bookingData.dates.endTime) bookingPayload.end_time = bookingData.dates.endTime;
+    }
+    
+    console.log('[Booking] Update payload:', JSON.stringify(bookingPayload, null, 2));
+
+    const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    const useMockApi = !isProduction;
+    
+    console.log('[Booking] Updating via', useMockApi ? 'mock' : 'real', 'API');
+
+    const { updateBooking } = await import('../services/bookingsService.js');
+    const result = await updateBooking(bookingId, bookingPayload);
+    
+    console.log('[Booking] Update response:', result);
+    return result;
+  } catch (error) {
+    console.error('[Booking] Update booking error:', error);
+    throw error;
+  }
+}
+
+// Helper functions to extract booking information
+function getPackageName(bookingData) {
+  if (bookingData.reservationType === 'room') {
+    return bookingData.selections.rooms.join(', ') || 'Room Booking';
+  } else if (bookingData.reservationType === 'cottage') {
+    return bookingData.selections.cottages.join(', ') || 'Cottage Booking';
+  } else if (bookingData.reservationType === 'function-hall') {
+    return bookingData.selections.hall || 'Function Hall Booking';
+  }
+  return 'Booking';
+}
+
+function getCheckInDate(bookingData) {
+  if (bookingData.reservationType === 'room') {
+    return bookingData.dates.checkin;
+  } else if (bookingData.reservationType === 'cottage') {
+    return bookingData.dates.date;
+  } else if (bookingData.reservationType === 'function-hall') {
+    return bookingData.dates.eventDate;
+  }
+  return new Date().toISOString().split('T')[0];
+}
+
+function getCheckOutDate(bookingData) {
+  if (bookingData.reservationType === 'room') {
+    return bookingData.dates.checkout;
+  } else if (bookingData.reservationType === 'cottage') {
+    return bookingData.dates.date; // Same day for cottage
+  } else if (bookingData.reservationType === 'function-hall') {
+    return bookingData.dates.eventDate; // Same day for function hall
+  }
+  return new Date().toISOString().split('T')[0];
+}
+
+function getTotalGuests(bookingData) {
+  if (bookingData.reservationType === 'room') {
+    return parseInt(bookingData.guests.adults) + parseInt(bookingData.guests.children);
+  } else if (bookingData.reservationType === 'cottage') {
+    return parseInt(bookingData.guests.adults) + parseInt(bookingData.guests.children);
+  } else if (bookingData.reservationType === 'function-hall') {
+    return parseInt(bookingData.guests.total);
+  }
+  return 1;
+}
+
+// Submit booking form
+window.submitBooking = async function(event) {
+  event.preventDefault();
+  
+  console.log('=== Booking Submission Started ===');
+  console.log('Form validation starting...');
+  
+  if (!validateForm()) {
+    console.error('Form validation failed');
+    // Scroll to first error
+    const firstError = document.querySelector('.form-input.error, .form-select.error');
+    if (firstError) {
+      firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    return;
+  }
+  
+  console.log('Form validation passed');
+  console.log('Collecting form data...');
+  
+  // Collect form data
+  const formData = new FormData(event.target);
+  const bookingData = {
+    reservationType: bookingFormState.reservationType,
+    guestInfo: {
+      name: formData.get('guestName'),
+      email: formData.get('email'),
+      contact: formData.get('contact')
+    },
+    dates: {},
+    guests: {},
+    selections: {},
+    payment: formData.get('paymentMode'),
+    agreement: formData.get('agreement') === 'on'
+  };
+  
+  // Add type-specific data
+  if (bookingFormState.reservationType === 'room') {
+    // Use pre-filled dates if available (from date-first flow), otherwise from form
+    const checkIn = bookingFormState.preFillDates?.checkin || formData.get('checkinDate');
+    const checkOut = bookingFormState.preFillDates?.checkout || formData.get('checkoutDate');
+    
+    bookingData.dates = {
+      checkin: checkIn,
+      checkout: checkOut,
+      nights: document.getElementById('nights-display')?.textContent || '0'
+    };
+    
+    // Calculate total guests from per-room guests (or use main guests field if no per-room data)
+    let totalAdults = 0;
+    let totalChildren = 0;
+    
+    if (bookingFormState.selectedRoomsFromFlow?.length > 0) {
+      // Calculate from per-room guests
+      bookingFormState.selectedRoomsFromFlow.forEach(roomId => {
+        const adultsInput = document.getElementById(`${roomId}-adults`);
+        const childrenInput = document.getElementById(`${roomId}-children`);
+        totalAdults += parseInt(adultsInput?.value || 0);
+        totalChildren += parseInt(childrenInput?.value || 0);
+      });
+    } else {
+      // Fallback to main form fields
+      totalAdults = parseInt(formData.get('adults') || 0);
+      totalChildren = parseInt(formData.get('children') || 0);
+    }
+    
+    bookingData.guests = {
+      adults: totalAdults,
+      children: totalChildren
+    };
+    // Get selected rooms from flow or form
+    const selectedRooms = bookingFormState.selectedRoomsFromFlow || Array.from(formData.getAll('selectedRooms'));
+    
+    bookingData.selections = {
+      rooms: selectedRooms,
+      cottages: bookingFormState.addCottageToRoom ? Array.from(formData.getAll('selectedCottages')) : []
+    };
+    
+    // Collect per-room guest details
+    const perRoomGuests = [];
+    if (bookingFormState.selectedRoomsFromFlow?.length > 0) {
+      bookingFormState.selectedRoomsFromFlow.forEach(roomId => {
+        const guestNameInput = document.getElementById(`${roomId}-guest-name`);
+        const adultsInput = document.getElementById(`${roomId}-adults`);
+        const childrenInput = document.getElementById(`${roomId}-children`);
+        
+        perRoomGuests.push({
+          roomId: roomId,
+          guestName: guestNameInput?.value || bookingData.guestInfo.name, // Default to main booker
+          adults: parseInt(adultsInput?.value || 1),
+          children: parseInt(childrenInput?.value || 0)
+        });
+      });
+    }
+    
+    // Add to booking data
+    if (perRoomGuests.length > 0) {
+      bookingData.perRoomGuests = perRoomGuests;
+    }
+  } else if (bookingFormState.reservationType === 'cottage') {
+    // Use pre-filled date if available (from date-first flow), otherwise from form
+    const visitDate = bookingFormState.preFillDates?.date || formData.get('cottageDate');
+    
+    bookingData.dates = {
+      date: visitDate,
+      usage_date: visitDate
+    };
+    bookingData.guests = {
+      adults: parseInt(formData.get('cottageAdults') || 1),
+      children: parseInt(formData.get('cottageChildren') || 0)
+    };
+    // Use selected cottages from flow (selectedCottagesFromFlow)
+    const cottagesArray = bookingFormState.selectedCottagesFromFlow || [];
+    bookingData.selections = {
+      cottages: cottagesArray,
+      rooms: bookingFormState.addRoomToCottage ? Array.from(formData.getAll('selectedRooms')) : []
+    };
+    
+    if (bookingFormState.addRoomToCottage) {
+      bookingData.dates.roomCheckin = formData.get('roomCheckin');
+      bookingData.dates.roomCheckout = formData.get('roomCheckout');
+    }
+  } else if (bookingFormState.reservationType === 'function-hall') {
+    bookingData.dates = {
+      eventDate: formData.get('eventDate'),
+      startTime: formData.get('eventStart'),
+      endTime: formData.get('eventEnd')
+    };
+    bookingData.selections = {
+      hall: formData.get('selectedHall'),
+      eventType: formData.get('eventType'),
+      specialRequests: formData.get('specialRequests'),
+      catering: document.getElementById('catering-required')?.checked || false,
+      setupDetails: formData.get('setupDetails')
+    };
+    bookingData.guests = {
+      total: formData.get('eventGuests')
+    };
+  }
+  
+  // Save booking to API
+  console.log('=== Attempting to save booking ===');
+  console.log('Booking data:', JSON.stringify(bookingData, null, 2));
+  
+  try {
+    // Validate availability before saving
+    if (bookingFormState.reservationType === 'room') {
+      const checkIn = bookingData.dates.checkin;
+      const checkOut = bookingData.dates.checkout;
+      const selectedRooms = bookingData.selections.rooms || [];
+      
+      console.log('[Booking] Validating availability before save:', { checkIn, checkOut, selectedRooms, editMode: bookingFormState.editMode });
+      
+      if (checkIn && checkOut && selectedRooms.length > 0) {
+        const { checkAvailability } = await import('../utils/api.js');
+        const category = 'rooms'; // For room bookings
+        // Exclude current booking from conflict checks if in edit mode
+        const excludeBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+          ? bookingFormState.bookingId 
+          : null;
+        const result = await checkAvailability(1, checkIn, checkOut, category, excludeBookingId);
+        
+        console.log('[Booking] Availability check result:', result);
+        
+        // Check availability: For each selected room, verify it's available on ALL dates in the range
+        if (result && result.dateAvailability && selectedRooms.length > 0) {
+          const unavailableRooms = [];
+          const dateAvailabilityMap = result.dateAvailability;
+          
+          // For each selected room, check if it's available on every date
+          selectedRooms.forEach(selectedRoom => {
+            const unavailableDates = [];
+            
+            // Check availability of this room on each date in the range
+            Object.entries(dateAvailabilityMap).forEach(([dateString, dayData]) => {
+              const availableRooms = dayData.availableRooms || [];
+              
+              // If this selected room is NOT in the available rooms list for this date, it's unavailable
+              if (!availableRooms.includes(selectedRoom)) {
+                unavailableDates.push(dateString);
+              }
+            });
+            
+            // If this room is unavailable on any date, record it
+            if (unavailableDates.length > 0) {
+              unavailableRooms.push({
+                room: selectedRoom,
+                unavailableDates: unavailableDates
+              });
+            }
+          });
+          
+          // If any selected rooms are unavailable, fail the validation
+          if (unavailableRooms.length > 0) {
+            console.error('[Booking] Availability check failed: Some rooms are not available on all dates:', unavailableRooms);
+            
+            // Build detailed error message
+            const roomMessages = unavailableRooms.map(({ room, unavailableDates }) => {
+              const datesList = unavailableDates.join(', ');
+              return `${room} is not available on: ${datesList}`;
+            });
+            
+            const errorMessage = `Selected rooms are not available for all dates:\n${roomMessages.join('\n')}\n\nPlease choose different dates or rooms.`;
+            
+            const { showToast } = await import('./toast.js');
+            showToast(errorMessage, 'error');
+            return;
+          }
+          
+          console.log('[Booking] ✓ All selected rooms are available on all dates');
+        } else if (result && result.available === false) {
+          console.error('[Booking] Availability check failed: Overall availability is false');
+          const { showToast } = await import('./toast.js');
+          showToast('No rooms available for the selected dates. Please choose different dates.', 'error');
+          return;
+        }
+      }
+    }
+    
+    // Also check availability for cottage bookings (mirrors room validation logic)
+    if (bookingFormState.reservationType === 'cottage') {
+      const visitDate = bookingData.dates.date; // Single date for cottage
+      const selectedCottages = bookingFormState.selectedCottagesFromFlow || bookingData.selections.cottages || [];
+      
+      console.log('[Booking] Validating cottage availability before save:', { visitDate, selectedCottages, editMode: bookingFormState.editMode });
+      
+      if (visitDate && selectedCottages.length > 0) {
+        const { checkAvailability } = await import('../utils/api.js');
+        const category = 'cottages';
+        // Exclude current booking from conflict checks if in edit mode
+        const excludeBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+          ? bookingFormState.bookingId 
+          : null;
+        // For single day, use the same date for check-in and check-out
+        const result = await checkAvailability(1, visitDate, visitDate, category, excludeBookingId);
+        
+        console.log('[Booking] Cottage availability check result:', result);
+        
+        // Check availability: For each selected cottage, verify it's available on the date
+        if (result && result.dateAvailability && selectedCottages.length > 0) {
+          const unavailableCottages = [];
+          const dateAvailabilityMap = result.dateAvailability;
+          
+          // For each selected cottage, check if it's available on the visit date
+          selectedCottages.forEach(selectedCottage => {
+            if (dateAvailabilityMap[visitDate]) {
+              const availableCottages = dateAvailabilityMap[visitDate].availableCottages || [];
+              
+              // If this selected cottage is NOT in the available cottages list, it's unavailable
+              if (!availableCottages.includes(selectedCottage)) {
+                unavailableCottages.push(selectedCottage);
+              }
+            }
+          });
+          
+          // If any selected cottages are unavailable, fail the validation
+          if (unavailableCottages.length > 0) {
+            console.error('[Booking] Availability check failed: Some cottages are not available:', unavailableCottages);
+            
+            // Build detailed error message
+            const cottageList = unavailableCottages.join(', ');
+            const errorMessage = `❌ Booking Conflict\n\nThe following cottages are not available on ${visitDate}:\n${cottageList}\n\nPlease select different cottages or choose another date.`;
+            
+            const { showToast } = await import('./toast.js');
+            showToast(errorMessage, 'error');
+            return;
+          }
+          
+          console.log('[Booking] ✓ All selected cottages are available on the visit date');
+        } else if (result && result.available === false) {
+          console.error('[Booking] Cottage availability check failed: Overall availability is false');
+          const { showToast } = await import('./toast.js');
+          showToast('No cottages available for the selected date. Please choose a different date.', 'error');
+          return;
+        }
+      }
+    }
+    
+    if (bookingFormState.editMode && bookingFormState.bookingId) {
+      console.log('Updating existing booking...');
+      const updatedBooking = await updateExistingBooking(bookingFormState.bookingId, bookingData);
+      console.log('Booking updated successfully:', updatedBooking);
+      
+      // Clear calendar cache
+      if (window.clearCalendarCache) {
+        window.clearCalendarCache();
+      }
+      
+      // Use toast notification
+      const { showToast } = await import('./toast.js');
+      showToast('Booking updated successfully!', 'success');
+      
+      closeBookingModal();
+      // Reload bookings page
+      location.reload();
+    } else {
+      console.log('Calling saveBooking...');
+      const savedBooking = await saveBooking(bookingData);
+      console.log('[Booking] Created booking with ID:', savedBooking?.id);
+      console.log('Booking saved successfully:', savedBooking);
+      
+      // Trigger refresh of bookings list if available
+      if (typeof window.refreshBookingsList === 'function') {
+        console.log('[Booking] Refreshing bookings list...');
+        await window.refreshBookingsList();
+      } else {
+        console.log('[Booking] refreshBookingsList not available, will refresh on next page load');
+      }
+      
+      // Clear calendar cache to ensure availability updates
+      if (window.clearCalendarCache) {
+        console.log('[Booking] Clearing calendar cache after successful booking...');
+        window.clearCalendarCache();
+      }
+      
+      showBookingSuccess(bookingData, savedBooking);
+      console.log('=== Booking Submission Complete ===');
+    }
+  } catch (error) {
+    console.error('Failed to save booking:', error);
+    console.error('Error details:', error.message);
+    alert(`Failed to complete booking: ${error.message}\n\nPlease try again or contact support.`);
+    return;
+  }
+}
+
+// Show booking success
+function showBookingSuccess(bookingData, savedBooking) {
+  const packageName = bookingData.reservationType === 'room' ? 'Standard Room' : 
+                      bookingData.reservationType === 'cottage' ? 'Cottage' : 'Function Hall';
+  
+  // Extract selected rooms and cottages
+  const selectedRooms = bookingData.selections.rooms || [];
+  // Use bookingState for cottages since it's managed there
+  const selectedCottages = bookingState.selectedCottages || bookingData.selections.cottages || [];
+  
+  // Build rooms list
+  let roomsList = '';
+  if (selectedRooms.length > 0) {
+    roomsList = `
+      <div class="success-section">
+        <h4>Selected Rooms</h4>
+        <ul class="booking-items-list">
+          ${selectedRooms.map(roomId => {
+            const roomGuest = bookingData.perRoomGuests?.find(rg => rg.roomId === roomId);
+            return `
+              <li>
+                <strong>${roomId}</strong>
+                ${roomGuest ? `<br><small>Guest: ${roomGuest.guestName}, Adults: ${roomGuest.adults}, Children: ${roomGuest.children}</small>` : ''}
+              </li>
+            `;
+          }).join('')}
+        </ul>
+      </div>
+    `;
+  }
+  
+  // Build cottages list
+  let cottagesList = '';
+  if (selectedCottages.length > 0) {
+    cottagesList = `
+      <div class="success-section">
+        <h4>Selected Cottages</h4>
+        <ul class="booking-items-list">
+          ${selectedCottages.map(cottageId => `<li><strong>${cottageId}</strong></li>`).join('')}
+        </ul>
+      </div>
+    `;
+  }
+  
+  const successHTML = `
+    <div class="booking-success-modal">
+      <div class="success-content">
+        <div class="success-icon-outer">
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #4caf50;">
+            <path d="M9 12l2 2 4-4"></path>
+            <circle cx="12" cy="12" r="10"></circle>
+          </svg>
+        </div>
+        <h3>Booking Confirmed!</h3>
+        <p>Your reservation has been successfully created.</p>
+        
+        <div class="booking-summary">
+          <h4>Booking Summary</h4>
+          <div class="summary-details">
+            <div class="summary-item">
+              <span>Booking ID:</span>
+              <strong>#${savedBooking.id}</strong>
+            </div>
+            <div class="summary-item">
+              <span>Package:</span>
+              <strong>${packageName}</strong>
+            </div>
+            ${bookingData.dates.checkin ? `
+              <div class="summary-item">
+                <span>Check-in:</span>
+                <strong>${bookingData.dates.checkin}</strong>
+              </div>
+              <div class="summary-item">
+                <span>Check-out:</span>
+                <strong>${bookingData.dates.checkout}</strong>
+              </div>
+            ` : ''}
+            ${bookingData.dates.nights ? `
+              <div class="summary-item">
+                <span>Nights:</span>
+                <strong>${bookingData.dates.nights}</strong>
+              </div>
+            ` : ''}
+            <div class="summary-item">
+              <span>Total Guests:</span>
+              <strong>${bookingData.guests.adults} Adults, ${bookingData.guests.children} Children</strong>
+            </div>
+            <div class="summary-item">
+              <span>Total Cost:</span>
+              <strong>₱${savedBooking.total_cost?.toLocaleString() || 'N/A'}</strong>
+            </div>
+            <div class="summary-item">
+              <span>Payment:</span>
+              <strong>${bookingData.payment}</strong>
+            </div>
+          </div>
+          
+          ${roomsList}
+          ${cottagesList}
+        </div>
+        
+        <div class="success-actions">
+          <button class="btn primary" onclick="window.goToMyBookings()">View My Bookings</button>
+          <button class="btn" onclick="closeBookingModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', successHTML);
+  
+  // Clear selections after successful booking
+  console.log('[showBookingSuccess] Booking successful, clearing selections');
+  bookingState.selectedCottages = [];
+  bookingState.selectedRooms = [];
+  
+  // Hide floating button when showing success (don't remove it)
+  const floatingBtn = document.getElementById('floating-continue-btn');
+  if (floatingBtn) {
+    floatingBtn.style.display = 'none';
+  }
+  
+  // Close main modal
+  setTimeout(() => {
+    closeBookingModal();
+  }, 1000);
+}
+
+// Global function for navigating to My Bookings
+window.goToMyBookings = function() {
+  document.querySelector('.booking-success-modal')?.remove();
+  closeBookingModal();
+  location.hash = '#/my-bookings';
+}
+
+// Handle escape key
+function handleEscapeKey(e) {
+  if (e.key === 'Escape') {
+    closeBookingModal();
+  }
+}
+
+// Show policy (placeholder)
+function showPolicy() {
+  alert('Booking and Cancellation Policy:\n\n- Cancellations made 48 hours before check-in: Full refund\n- Cancellations made 24-48 hours before check-in: 50% refund\n- Cancellations made less than 24 hours before check-in: No refund\n- No-shows: No refund\n\nFor more details, please contact our reservations team.');
+}
+
+// Calendar integration functions
+function openCalendarForCheckin() {
+  // Store current booking modal state
+  window.bookingModalCalendarMode = 'checkin';
+  
+  // Only store actual date values, not empty strings
+  const checkinValue = document.getElementById('checkin-date')?.value;
+  const checkoutValue = document.getElementById('checkout-date')?.value;
+  
+  window.bookingModalCurrentDates = {
+    checkin: checkinValue && checkinValue.trim() !== '' ? checkinValue : null,
+    checkout: checkoutValue && checkoutValue.trim() !== '' ? checkoutValue : null
+  };
+  
+  // Open calendar modal for room booking
+  // Pass bookingId if in edit mode to exclude it from availability checks
+  if (window.openCalendarModal) {
+    const editBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    window.openCalendarModal('Room Booking', 15, 'rooms', editBookingId);
+  }
+}
+
+function openCalendarForCheckout() {
+  // Store current booking modal state
+  window.bookingModalCalendarMode = 'checkout';
+  
+  // Only store actual date values, not empty strings
+  const checkinValue = document.getElementById('checkin-date')?.value;
+  const checkoutValue = document.getElementById('checkout-date')?.value;
+  
+  window.bookingModalCurrentDates = {
+    checkin: checkinValue && checkinValue.trim() !== '' ? checkinValue : null,
+    checkout: checkoutValue && checkoutValue.trim() !== '' ? checkoutValue : null
+  };
+  
+  // Open calendar modal for room booking
+  // Pass bookingId if in edit mode to exclude it from availability checks
+  if (window.openCalendarModal) {
+    const editBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    window.openCalendarModal('Room Booking', 15, 'rooms', editBookingId);
+  }
+}
+
+function updateBookingDates(checkinDate, checkoutDate) {
+  const checkinInput = document.getElementById('checkin-date');
+  const checkoutInput = document.getElementById('checkout-date');
+  
+  if (checkinInput && checkinDate) {
+    checkinInput.value = checkinDate;
+  }
+  
+  if (checkoutInput && checkoutDate) {
+    checkoutInput.value = checkoutDate;
+  }
+  
+  // Trigger change events to update nights calculation
+  if (checkinInput) checkinInput.dispatchEvent(new Event('change'));
+  if (checkoutInput) checkoutInput.dispatchEvent(new Event('change'));
+}
+
+// Update cottage date from calendar
+function updateCottageDate(date) {
+  const dateInput = document.getElementById('cottage-date');
+  if (dateInput && date) {
+    dateInput.value = date;
+    dateInput.dispatchEvent(new Event('change'));
+  }
+}
+
+// Make functions globally available
+window.openBookingModal = openBookingModal;
+window.closeBookingModal = closeBookingModal;
+window.changeReservationType = changeReservationType;
+window.toggleAddCottage = toggleAddCottage;
+window.submitBooking = submitBooking;
+window.showPolicy = showPolicy;
+
+// Calendar integration functions
+function openCalendarForCottage() {
+  // Mark that we're modifying cottage date from within the booking modal
+  window.bookingModalCalendarMode = 'cottage';
+  // Store current cottage date if present
+  const cottageDateValue = document.getElementById('cottage-date')?.value;
+  window.bookingModalCurrentDates = { date: cottageDateValue && cottageDateValue.trim() !== '' ? cottageDateValue : null };
+  if (window.openCalendarModal) {
+    const editBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    window.openCalendarModal('Cottage Booking', 8, 'cottages', editBookingId);
+  }
+}
+
+function openCalendarForFunctionHall() {
+  // Mark that we're modifying function hall date from within the booking modal
+  window.bookingModalCalendarMode = 'function-hall';
+  // Store current function hall date if present
+  const eventDateValue = document.getElementById('event-date')?.value;
+  window.bookingModalCurrentDates = { date: eventDateValue && eventDateValue.trim() !== '' ? eventDateValue : null };
+  
+  if (window.openCalendarModal) {
+    const editBookingId = bookingFormState.editMode && bookingFormState.bookingId 
+      ? bookingFormState.bookingId 
+      : null;
+    window.openCalendarModal('Function Hall Booking', 5, 'function-halls', editBookingId);
+  }
+}
+
+// Update function hall date from calendar
+function updateFunctionHallDate(date) {
+  const dateInput = document.getElementById('event-date');
+  if (dateInput && date) {
+    dateInput.value = date;
+    dateInput.dispatchEvent(new Event('change'));
+  }
+}
+
+window.openCalendarForCheckin = openCalendarForCheckin;
+window.openCalendarForCheckout = openCalendarForCheckout;
+window.updateBookingDates = updateBookingDates;
+window.openCalendarForCottage = openCalendarForCottage;
+window.openCalendarForFunctionHall = openCalendarForFunctionHall;
+window.updateCottageDate = updateCottageDate;
+window.updateFunctionHallDate = updateFunctionHallDate;
+window.bookingFormState = bookingFormState; // Expose for calendar validation
+
+// Open cottage selection as a separate modal overlay (like room add-on flow)
+window.openCottageSelectionModal = async function() {
+  const visit = document.getElementById('cottage-date')?.value || bookingFormState.preFillDates?.date;
+  if (!visit) {
+    alert('Please select a date first');
+    return;
+  }
+  // Build selection view using existing generator
+  try {
+    const html = generateCottageSelectionView(await (async () => {
+      const { checkAvailability } = await import('../utils/api.js');
+      const result = await checkAvailability(1, visit, visit, 'cottages');
+      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+      // Filter out already-selected to avoid duplicates in selection modal
+      const selected = bookingState.selectedCottages || [];
+      available = available.filter(c => !selected.includes(c));
+      return available;
+    })(), visit, visit);
+    if (window.openModal) {
+      // Wrap with a container so our existing buttons work
+      window.openModal(html);
+    } else {
+      // Fallback: inject into form if modal utility is unavailable
+      const content = document.querySelector('.booking-form-content');
+      if (content) content.innerHTML = html;
+    }
+  } catch (e) {
+    alert('Failed to load cottage availability. Please try again.');
+  }
+};
+
+// Modal title helper based on category
+function getModalTitle() {
+  if (bookingFormState.editMode) return 'Edit Booking';
+  const map = {
+    'rooms': 'Book a Room',
+    'cottages': 'Book a Cottage',
+    'function-halls': 'Book a Function Hall'
+  };
+  return map[bookingFormState.category] || 'Make a Reservation';
+}
