@@ -1401,24 +1401,55 @@ label {
   height: 400px;
   padding: 16px;
   overflow-y: auto;
+  overflow-x: hidden;
   background: #fafafa;
   display: flex;
   flex-direction: column;
   gap: 16px;
   scroll-behavior: smooth;
+  /* Prevent scroll propagation to page */
+  overscroll-behavior: contain;
+}
+
+/* Custom scrollbar for chat messages */
+.ai-chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ai-chat-messages::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.ai-chat-messages::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+}
+
+.ai-chat-messages::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Firefox scrollbar */
+.ai-chat-messages {
+  scrollbar-width: thin;
+  scrollbar-color: #888 #f1f1f1;
 }
 
 .message-group {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: flex-end;
   max-width: 80%;
+  min-width: 0;
 }
 
 .user-message-group {
   flex-direction: row-reverse;
   align-self: flex-end;
   margin-left: auto;
+  max-width: 75%;
+  min-width: 0;
 }
 
 .message-avatar {
@@ -1434,7 +1465,7 @@ label {
 }
 
 .user-message-group .message-avatar {
-  background: #6366f1;
+  display: none; /* Hide user chathead/avatar */
 }
 
 .message-bubble {
@@ -1444,6 +1475,10 @@ label {
   position: relative;
   max-width: 100%;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .ai-message-bubble {
@@ -1460,13 +1495,153 @@ label {
 
 .message-text {
   margin: 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .message-text p {
-  margin: 0;
+  margin: 0 0 10px 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.7;
   color: inherit;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* User message specific font sizing - ensure consistent sizing */
+.user-message-bubble .message-text {
+  font-size: 14px;
+}
+
+.user-message-bubble .message-text p {
+  font-size: 14px !important;
+  line-height: 1.7;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.user-message-bubble .message-text li {
+  font-size: 14px !important;
+}
+
+.user-message-bubble .message-text ul,
+.user-message-bubble .message-text ol {
+  font-size: 14px;
+}
+
+.user-message-bubble .message-text strong,
+.user-message-bubble .message-text em,
+.user-message-bubble .message-text u {
+  font-size: 14px;
+}
+
+.message-text p:last-child {
+  margin-bottom: 0;
+}
+
+.message-text p:first-child {
+  margin-top: 0;
+}
+
+.message-text ul,
+.message-text ol {
+  margin: 8px 0;
+  padding-left: 24px;
+  color: inherit;
+  list-style-position: outside;
+  counter-reset: none;
+}
+
+.message-text ul {
+  list-style-type: disc;
+}
+
+/* Ordered lists removed - all lists are now bullet lists */
+
+.message-text ul li {
+  margin: 6px 0;
+  padding-left: 4px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: inherit;
+  display: list-item;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.message-text li::marker {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.message-text strong {
+  font-weight: 600;
+  color: inherit;
+}
+
+.message-text em {
+  font-style: italic;
+  color: inherit;
+}
+
+.message-text u {
+  text-decoration: underline;
+  color: inherit;
+}
+
+.message-text del {
+  text-decoration: line-through;
+  opacity: 0.8;
+  color: inherit;
+}
+
+.message-text code {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  color: inherit;
+}
+
+.message-text pre {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.message-text pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  display: block;
+}
+
+.ai-message-bubble code {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.ai-message-bubble pre {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.user-message-bubble code {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.user-message-bubble pre {
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .message-time {
@@ -1480,6 +1655,48 @@ label {
   color: rgba(0,0,0,0.6);
 }
 
+/* Suggested Questions - Clean UI */
+.ai-suggested-questions {
+  margin-top: 16px;
+  padding: 0;
+  background: transparent;
+}
+
+.suggested-questions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggested-question-button {
+  width: 100%;
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #18181b;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.suggested-question-button:hover {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.suggested-question-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
 /* Input Area */
 .ai-chat-input-container {
   padding: 16px;
@@ -1491,7 +1708,7 @@ label {
 .ai-chat-input-wrapper {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .ai-chat-input {
@@ -1503,15 +1720,51 @@ label {
   color: #18181b;
   outline: none;
   transition: all 0.2s ease;
+  resize: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 44px;
+  max-height: 120px;
+  font-family: inherit;
+  line-height: 1.5;
+  word-wrap: break-word;
+  /* Firefox scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #888 #f1f1f1;
 }
 
-.ai-chat-input:focus {
+.ai-chat-input:focus:not(:disabled) {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
+.ai-chat-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #f9fafb;
+}
+
 .ai-chat-input::placeholder {
   color: #71717a;
+}
+
+/* Custom scrollbar for textarea - visible when content exceeds max height */
+.ai-chat-input::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ai-chat-input::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.ai-chat-input::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.ai-chat-input::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 .ai-chat-send {
@@ -1529,17 +1782,17 @@ label {
   flex-shrink: 0;
 }
 
-.ai-chat-send:hover {
+.ai-chat-send:hover:not(:disabled) {
   opacity: 0.9;
   transform: scale(1.05);
 }
 
-.ai-chat-send:active {
+.ai-chat-send:active:not(:disabled) {
   transform: scale(0.95);
 }
 
 .ai-chat-send:disabled {
-  background: #cbd5e1;
+  opacity: 0.6;
   cursor: not-allowed;
   transform: none;
 }
@@ -1664,14 +1917,14 @@ label {
 /* Typing Indicator */
 .typing-indicator {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
-  padding: 12px 16px;
+}
+
+/* Yellow background for AI typing indicator (loading state) */
+.typing-indicator .message-bubble {
   background: #ffd700;
-  border-radius: 16px;
-  border-bottom-left-radius: 4px;
-  max-width: 80px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: none;
 }
 
 .typing-dots {
