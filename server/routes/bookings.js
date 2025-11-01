@@ -445,12 +445,13 @@ router.get('/availability/:packageId', async (req, res) => {
           availableCottages: availableItems,
           bookedCount: bookedIds.length,
           availableCount: availableItems.length,
-          isBooked: bookedIds.length > 0  // Any cottage booked = date has bookings
+          isBooked: bookedIds.length === allItems.length  // All cottages booked = fully booked
         };
         
         // Enhanced logging for cottage bookings
         if (bookedIds.length > 0) {
-          console.log(`[Availability] ${dateString}: bookedCount=${bookedIds.length}, isBooked=true, bookedCottages=${JSON.stringify(bookedIds)}, availableCottages=${JSON.stringify(availableItems)}`);
+          const isFullyBooked = bookedIds.length === allItems.length;
+          console.log(`[Availability] ${dateString}: bookedCount=${bookedIds.length}, isBooked=${isFullyBooked}, bookedCottages=${JSON.stringify(bookedIds)}, availableCottages=${JSON.stringify(availableItems)}`);
         }
       } else if (itemType === 'function-hall') {
         dateAvailability[dateString] = {
@@ -459,12 +460,13 @@ router.get('/availability/:packageId', async (req, res) => {
           availableHalls: availableItems,
           bookedCount: bookedIds.length,
           availableCount: availableItems.length,
-          isBooked: bookedIds.length > 0
+          isBooked: bookedIds.length === allItems.length  // All halls booked = fully booked
         };
         
         // Enhanced logging for function hall bookings
         if (bookedIds.length > 0) {
-          console.log(`[Availability] 🏛️ ${dateString}: bookedCount=${bookedIds.length}, isBooked=true, bookedHalls=${JSON.stringify(bookedIds)}, availableHalls=${JSON.stringify(availableItems)}`);
+          const isFullyBooked = bookedIds.length === allItems.length;
+          console.log(`[Availability] 🏛️ ${dateString}: bookedCount=${bookedIds.length}, isBooked=${isFullyBooked}, bookedHalls=${JSON.stringify(bookedIds)}, availableHalls=${JSON.stringify(availableItems)}`);
         }
       }
 

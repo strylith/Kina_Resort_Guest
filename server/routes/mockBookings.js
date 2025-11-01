@@ -1014,7 +1014,7 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         
         dateAvailability[dateString] = {
           status: status,
-          isBooked: bookedIds.length > 0,
+          isBooked: bookedIds.length === allItems.length,  // All cottages booked = fully booked
           bookedCount: bookedIds.length,
           availableCount: availableItems.length,
           bookedItems: bookedIds,
@@ -1030,7 +1030,8 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         
         // Enhanced logging for booked cottages
         if (bookedIds.length > 0) {
-          console.log(`[MockAvailability] ⚠️  ${dateString} HAS BOOKINGS: bookedCount=${bookedIds.length}, isBooked=true, status=${status}`);
+          const isFullyBooked = bookedIds.length === allItems.length;
+          console.log(`[MockAvailability] ⚠️  ${dateString} HAS BOOKINGS: bookedCount=${bookedIds.length}, isBooked=${isFullyBooked}, status=${status}`);
         }
       } else {
         // Function hall (use same logic as cottages)
@@ -1046,7 +1047,7 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         
         dateAvailability[dateString] = {
           status: status,
-          isBooked: bookedIds.length > 0,
+          isBooked: bookedIds.length === allItems.length,  // All halls booked = fully booked
           bookedCount: bookedIds.length,
           availableCount: availableItems.length,
           bookedItems: bookedIds,
@@ -1058,7 +1059,8 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         
         // Enhanced logging for booked function halls
         if (bookedIds.length > 0) {
-          console.log(`[MockAvailability] ${dateString}: bookedCount=${bookedIds.length}, isBooked=true, status=${status}, bookedHalls=${JSON.stringify(bookedIds)}, availableHalls=${JSON.stringify(availableItems)}`);
+          const isFullyBooked = bookedIds.length === allItems.length;
+          console.log(`[MockAvailability] ${dateString}: bookedCount=${bookedIds.length}, isBooked=${isFullyBooked}, status=${status}, bookedHalls=${JSON.stringify(bookedIds)}, availableHalls=${JSON.stringify(availableItems)}`);
         }
       }
       
