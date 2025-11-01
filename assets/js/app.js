@@ -145,6 +145,9 @@ function onReady(){
   // Make auth state globally available
   window.getAuthState = getAuthState;
   
+  // Make showToast globally available
+  window.showToast = showToast;
+  
   // Initialize smooth scrolling
   lenisInstance = initSmoothScroll();
   

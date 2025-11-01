@@ -103,7 +103,7 @@ END $$;
 -- Step 3: Add comments for documentation
 COMMENT ON TABLE public.booking_items IS 'Stores individual items (rooms, cottages, function halls) booked in a reservation';
 COMMENT ON COLUMN public.booking_items.item_type IS 'Type of item: room, cottage, or function-hall';
-COMMENT ON COLUMN public.booking_items.item_id IS 'Specific item identifier (e.g., "Room A1", "Family Cottage")';
+COMMENT ON COLUMN public.booking_items.item_id IS 'Specific item identifier (e.g., "Room 01", "Family Cottage")';
 COMMENT ON COLUMN public.booking_items.guest_name IS 'Name of primary guest for this specific item';
 COMMENT ON COLUMN public.booking_items.adults IS 'Number of adults for this item';
 COMMENT ON COLUMN public.booking_items.children IS 'Number of children for this item';

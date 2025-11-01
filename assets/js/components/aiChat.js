@@ -219,7 +219,7 @@ async function getAIResponse(userMessage) {
   }
   
   try {
-    console.log('Sending request to DeepSeek API...');
+    console.log('Sending request to OpenRouter API...');
     
     // Construct full messages array with system prompt and history
     const messages = [

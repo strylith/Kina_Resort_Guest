@@ -77,6 +77,38 @@ export function createLuxuryCard(cardData) {
 
 // Handle Book Now button click
 window.handleBookNow = function(packageName, category = null) {
+  // Check authentication first
+  const authState = window.getAuthState ? window.getAuthState() : { isLoggedIn: false };
+  if (!authState.isLoggedIn) {
+    console.log('[handleBookNow] User not authenticated, redirecting to login');
+    
+    // Store booking intent for after login
+    const bookingIntent = {
+      packageName,
+      category,
+      timestamp: Date.now()
+    };
+    sessionStorage.setItem('bookingIntent', JSON.stringify(bookingIntent));
+    
+    // Show toast message
+    if (window.showToast) {
+      window.showToast('Please login to continue booking', 'info');
+    } else {
+      // Fallback if showToast is not available
+      alert('Please login to continue booking');
+    }
+    
+    // Get current page for return URL
+    const currentHash = window.location.hash || '#/packages';
+    const returnUrl = currentHash.includes('#/auth') || currentHash.includes('#/register') 
+      ? '#/packages' 
+      : currentHash;
+    
+    // Redirect to login with return URL
+    window.location.hash = `#/auth?return=${encodeURIComponent(returnUrl)}`;
+    return;
+  }
+  
   // Determine reservation type and category from package name or explicit parameter
   let reservationType = 'room';
   let calendarCategory = 'rooms';
@@ -132,18 +164,18 @@ export const allPackages = {
     {
       image: 'images/cottage_1.JPG',
       title: 'Standard Cottage',
-      price: '₱9,500/night',
-      capacity: 6,
-      description: 'Private cottage with direct beach access, outdoor seating area, and basic amenities.',
+      price: '₱400',
+      capacity: 8,
+      description: 'Private cottage with basic amenities.',
       category: 'cottages',
       groupDiscount: true,
       discountText: '10% off for groups of 4+ guests'
     },
     {
       image: 'images/cottage_2.JPG',
-      title: 'Garden Cottage',
-      price: '₱7,500/night',
-      capacity: 4,
+      title: 'Open Cottage',
+      price: '₱300',
+      capacity: 8,
       description: 'Cozy cottage surrounded by tropical gardens, perfect for peaceful relaxation.',
       category: 'cottages',
       groupDiscount: true,
@@ -152,9 +184,9 @@ export const allPackages = {
     {
       image: 'images/kina1.jpg',
       title: 'Family Cottage',
-      price: '₱10,200/night',
-      capacity: 7,
-      description: 'Spacious cottage with 2 bedrooms, kitchenette, and living area for families.',
+      price: '₱500',
+      capacity: 8,
+      description: 'A spacious, open-air cottage with tables and chairs, ideal for daytime relaxation, dining, and gatherings.',
       category: 'cottages',
       groupDiscount: true,
       discountText: '10% off for groups of 4+ guests'
@@ -164,8 +196,8 @@ export const allPackages = {
     {
       image: 'images/kina1.jpg',
       title: 'Standard Room',
-      price: '₱5,500/night',
-      description: 'Comfortable room with air conditioning, private bathroom, and garden view.',
+      price: '₱1,500/night',
+      description: 'Comfortable rooms with air conditioning, family-sized bed and private bathroom. All 4 rooms are identically designed with modern amenities and stunning garden views.',
       category: 'rooms',
       groupDiscount: true,
       discountText: '10% off for groups of 4+ guests'
@@ -173,7 +205,7 @@ export const allPackages = {
     {
       image: 'images/kina2.jpg',
       title: 'Ocean View Room',
-      price: '₱7,200/night',
+      price: '₱1,500/night',
       description: 'Room with balcony overlooking the ocean, perfect for sunset views.',
       category: 'rooms',
       groupDiscount: true,
@@ -182,7 +214,7 @@ export const allPackages = {
     {
       image: 'images/kina3.jpg',
       title: 'Deluxe Suite',
-      price: '₱8,500/night',
+      price: '₱1,500/night',
       description: 'Spacious suite with separate living area, mini-fridge, and premium amenities.',
       category: 'rooms',
       groupDiscount: true,
@@ -191,7 +223,7 @@ export const allPackages = {
     {
       image: 'images/resort1.JPG',
       title: 'Premium King',
-      price: '₱7,500/night',
+      price: '₱1,500/night',
       description: 'Executive comfort with elegant design and premium furnishings.',
       category: 'rooms',
       groupDiscount: true,
@@ -296,17 +328,17 @@ export const allPackages = {
     {
       image: 'images/Function Hall.JPG',
       title: 'Grand Function Hall',
-      price: '₱15,000/day',
+      price: '₱10,000+',
       description: 'Spacious hall perfect for weddings, conferences, and large events. Includes tables, chairs, sound system, and air conditioning.',
       category: 'function-halls',
-      capacity: 200,
+      capacity: 100,
       groupDiscount: true,
       discountText: 'Special rates for multi-day bookings'
     },
     {
       image: 'images/Function Hall.JPG',
       title: 'Intimate Function Hall',
-      price: '₱10,000/day',
+      price: '₱10,000+',
       description: 'Cozy hall ideal for birthday parties, meetings, and gatherings. Perfect for smaller celebrations with modern amenities.',
       category: 'function-halls',
       capacity: 100,
@@ -374,6 +406,51 @@ export function createCategoryCard(categoryData) {
       <!-- Expanded State (Visible on Hover) -->
       <div class="category-info-expanded">
         <p class="category-description">${description}</p>
+        ${category === 'function-halls' ? `
+        <div class="discount-details">
+          <h4>Services Prices:</h4>
+          <div class="discount-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            <span>Sound System - <strong>₱2,400</strong></span>
+          </div>
+          <div class="discount-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            <span>Projection/Screen - <strong>₱2,000</strong></span>
+          </div>
+          <div class="discount-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <span>Catering - <strong>₱450/head</strong></span>
+          </div>
+          <h4 style="margin-top: 16px;">Addons:</h4>
+          <div class="discount-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>Extra Chairs/Tables - <strong>₱70</strong></span>
+          </div>
+          <div class="discount-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 6v6l4 2"></path>
+            </svg>
+            <span>LED Lightings - <strong>₱2,500</strong></span>
+          </div>
+        </div>
+        ` : `
         <div class="discount-details">
           <h4>Available Discounts</h4>
           <div class="discount-item">
@@ -391,6 +468,7 @@ export function createCategoryCard(categoryData) {
             <span>Groups of 4+: <strong>10% off</strong></span>
           </div>
         </div>
+        `}
         <button class="category-book-btn" onclick="handleBookNow('${title}', '${category}')">
           Book Now
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

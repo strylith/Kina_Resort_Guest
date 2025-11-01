@@ -20,10 +20,18 @@ export async function AuthPage(){
     if (result.success) {
       showToast('Login successful! Welcome back, ' + result.user.firstName + '!', 'success');
       window.kinaCloseModal();
-      // Redirect to return URL or homepage
+      
+      // Clear all booking-related intents and redirect to packages page
       setTimeout(() => {
-        const returnParam = new URLSearchParams(location.hash.split('?')[1] || '').get('return');
-        location.hash = returnParam || '#/';
+        // Clear all booking intents from sessionStorage
+        sessionStorage.removeItem('bookingIntent');
+        sessionStorage.removeItem('calendarIntent');
+        sessionStorage.removeItem('bookingModalIntent');
+        
+        console.log('[Auth] Cleared all booking intents, redirecting to packages page');
+        
+        // Redirect to packages page
+        location.hash = '#/packages';
       }, 1000);
     } else {
       showToast(result.message, 'error');

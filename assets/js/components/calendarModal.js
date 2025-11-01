@@ -1467,6 +1467,40 @@ window.confirmDateSelection = function() {
 
 // Create and show the calendar modal
 export function openCalendarModal(packageTitle, reservationCount, packageCategory = 'rooms', editBookingId = null, constraintDates = null) {
+  // Check authentication (allow edit mode to proceed as it's already authenticated)
+  if (!editBookingId) {
+    const authState = window.getAuthState ? window.getAuthState() : { isLoggedIn: false };
+    if (!authState.isLoggedIn) {
+      console.log('[openCalendarModal] User not authenticated, redirecting to login');
+      
+      // Store calendar parameters for after login
+      const calendarIntent = {
+        packageTitle,
+        reservationCount,
+        packageCategory,
+        timestamp: Date.now()
+      };
+      sessionStorage.setItem('calendarIntent', JSON.stringify(calendarIntent));
+      
+      // Show toast message
+      if (window.showToast) {
+        window.showToast('Please login to continue booking', 'info');
+      } else {
+        alert('Please login to continue booking');
+      }
+      
+      // Get current page for return URL
+      const currentHash = window.location.hash || '#/packages';
+      const returnUrl = currentHash.includes('#/auth') || currentHash.includes('#/register') 
+        ? '#/packages' 
+        : currentHash;
+      
+      // Redirect to login with return URL
+      window.location.hash = `#/auth?return=${encodeURIComponent(returnUrl)}`;
+      return;
+    }
+  }
+  
   // Save booking modal state BEFORE closing (so it doesn't get cleared)
   const savedModalMode = window.bookingModalCalendarMode;
   const savedModalDates = window.bookingModalCurrentDates;

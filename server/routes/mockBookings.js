@@ -38,6 +38,27 @@ router.get('/bookings', (req, res) => {
       
       const packageData = mockClient.tables.packages.get(String(booking.package_id));
       
+      // Log package lookup for debugging
+      if (!packageData && booking.package_id) {
+        console.warn('[MockBookings] Package not found for booking:', {
+          bookingId: booking.id,
+          package_id: booking.package_id,
+          category: booking.category
+        });
+      } else if (packageData) {
+        console.log('[MockBookings] Package found:', {
+          bookingId: booking.id,
+          package_id: booking.package_id,
+          packageTitle: packageData.title,
+          packageCategory: packageData.category
+        });
+      } else {
+        console.warn('[MockBookings] Booking missing package_id:', {
+          bookingId: booking.id,
+          category: booking.category
+        });
+      }
+      
       return {
         ...booking,
         booking_items: items || [],
@@ -68,10 +89,97 @@ router.post('/bookings', async (req, res) => {
       specialRequests,
       selectedCottages,
       selectedHall,
-      cottageDates  // Array of dates for cottage rentals
+      cottageDates,  // Array of dates for cottage rentals
+      // Function hall fields
+      hallId,
+      hallName,
+      eventName,
+      eventType,
+      setupType,
+      startTime,
+      endTime,
+      decorationTheme,
+      organization,
+      soundSystemRequired,
+      projectorRequired,
+      cateringRequired,
+      equipmentAddons
     } = req.body;
 
     console.log('[MockBookings] Creating booking:', { packageId, checkIn, checkOut });
+
+    // Validate contact number - must be exactly 11 digits
+    if (contactNumber) {
+      const digitsOnly = String(contactNumber).replace(/\D/g, '');
+      if (digitsOnly.length !== 11) {
+        console.warn('[MockBookings] Validation failed:', {
+          field: 'contactNumber',
+          value: contactNumber,
+          digitCount: digitsOnly.length,
+          error: 'Contact number must be exactly 11 digits',
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Contact number must be exactly 11 digits (received ${digitsOnly.length} digits)`
+        });
+      }
+    } else {
+      console.warn('[MockBookings] Validation failed:', {
+        field: 'contactNumber',
+        error: 'Contact number is required',
+        timestamp: new Date().toISOString()
+      });
+      return res.status(400).json({
+        success: false,
+        error: 'Contact number is required'
+      });
+    }
+    
+    // Validate room capacity if per-room guests provided
+    const ROOM_CAPACITY = 4; // Maximum guests per room
+    if (Array.isArray(perRoomGuests) && perRoomGuests.length > 0) {
+      for (const roomGuest of perRoomGuests) {
+        const roomAdults = roomGuest.adults || 0;
+        const roomChildren = roomGuest.children || 0;
+        const roomTotal = roomAdults + roomChildren;
+        
+        if (roomTotal > ROOM_CAPACITY) {
+          console.warn('[MockBookings] Validation failed:', {
+            field: 'perRoomGuests',
+            roomId: roomGuest.roomId || 'unknown',
+            adults: roomAdults,
+            children: roomChildren,
+            total: roomTotal,
+            capacity: ROOM_CAPACITY,
+            error: `Room capacity exceeded: ${roomTotal} guests exceeds maximum of ${ROOM_CAPACITY}`,
+            timestamp: new Date().toISOString()
+          });
+          return res.status(400).json({
+            success: false,
+            error: `Room ${roomGuest.roomId || 'unknown'} exceeds capacity: ${roomTotal} guests (maximum ${ROOM_CAPACITY} allowed)`
+          });
+        }
+      }
+    } else if (guests && typeof guests === 'object') {
+      // Validate main guests object for single room bookings
+      const totalGuests = (guests.adults || 0) + (guests.children || 0);
+      if (totalGuests > ROOM_CAPACITY) {
+        console.warn('[MockBookings] Validation failed:', {
+          field: 'guests',
+          adults: guests.adults || 0,
+          children: guests.children || 0,
+          total: totalGuests,
+          capacity: ROOM_CAPACITY,
+          error: `Guest count exceeds room capacity: ${totalGuests} guests exceeds maximum of ${ROOM_CAPACITY}`,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Guest count exceeds room capacity: ${totalGuests} guests (maximum ${ROOM_CAPACITY} allowed per room)`
+        });
+      }
+    }
 
     // Verify package exists
     const packageData = mockClient.tables.packages.get(String(packageId));
@@ -81,6 +189,28 @@ router.post('/bookings', async (req, res) => {
         error: `Package not found (ID: ${packageId})`
       });
     }
+    
+    // Validate cottage capacity if this is a cottage booking
+    const COTTAGE_CAPACITY = 8; // Maximum guests per cottage
+    if (packageData.category === 'cottages' && guests && typeof guests === 'object') {
+      const totalGuests = (guests.adults || 0) + (guests.children || 0);
+      if (totalGuests > COTTAGE_CAPACITY) {
+        console.warn('[MockBookings] Validation failed:', {
+          field: 'guests',
+          category: 'cottages',
+          adults: guests.adults || 0,
+          children: guests.children || 0,
+          total: totalGuests,
+          capacity: COTTAGE_CAPACITY,
+          error: `Guest count exceeds cottage capacity: ${totalGuests} guests exceeds maximum of ${COTTAGE_CAPACITY}`,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Guest count exceeds cottage capacity: ${totalGuests} guests (maximum ${COTTAGE_CAPACITY} allowed per cottage)`
+        });
+      }
+    }
 
     // Generate booking ID
     const bookingId = Date.now().toString();
@@ -88,6 +218,38 @@ router.post('/bookings', async (req, res) => {
     const guestEmail = req.body.email || null; // Store guest email for user filtering
     const category = req.body.category || 'rooms'; // Store category (rooms, cottages, function-halls)
 
+    // Build function hall metadata if this is a function hall booking
+    const { buildFunctionHallMetadata } = await import('../utils/functionHallMetadata.js');
+    const fhHallId = hallId || selectedHall || null;
+    const fhMetadata = buildFunctionHallMetadata({
+      hallId: fhHallId,
+      hallName,
+      eventName,
+      eventType,
+      setupType,
+      decorationTheme,
+      organization,
+      startTime,
+      endTime,
+      soundSystemRequired,
+      projectorRequired,
+      cateringRequired,
+      equipmentAddons
+    });
+    
+    if (fhMetadata) {
+      console.log('[MockBookings] Function hall metadata created:', JSON.stringify(fhMetadata, null, 2));
+    } else if (category === 'function-halls' && fhHallId) {
+      console.log('[MockBookings] ⚠️ Function hall booking but metadata is null - insufficient event data');
+      console.log('[MockBookings] Missing fields:', {
+        hasEventName: !!eventName,
+        hasEventType: !!eventType,
+        hasSetupType: !!setupType,
+        hasStartTime: !!startTime,
+        hasEndTime: !!endTime
+      });
+    }
+    
     // Create booking
     const booking = {
       id: bookingId,
@@ -106,7 +268,15 @@ router.post('/bookings', async (req, res) => {
       created_at: new Date().toISOString()
     };
     
+    // Add function hall metadata if available
+    if (fhMetadata) {
+      booking.function_hall_metadata = fhMetadata;
+    }
+    
     console.log('[MockBookings] Creating booking with user association:', { userId, email: guestEmail });
+    if (fhMetadata) {
+      console.log('[MockBookings] Booking includes function_hall_metadata');
+    }
 
     mockClient.tables.bookings.set(bookingId, booking);
 
@@ -169,17 +339,17 @@ router.post('/bookings', async (req, res) => {
     }
 
     // Create booking items for function halls
-    // Support both legacy selectedHall and new hallId fields with usage_date
-    const hallId = req.body.hallId || req.body.selectedHall || null;
-    const eventDate = (req.body.checkIn && req.body.checkOut && req.body.checkIn === req.body.checkOut) ? req.body.checkIn : (req.body.eventDate || req.body.dates?.eventDate || null);
-    if (hallId) {
+    // Use the same hallId we used for metadata (already defined above as fhHallId)
+    const finalHallId = fhHallId;
+    const eventDate = (checkIn && checkOut && checkIn === checkOut) ? checkIn : (req.body.eventDate || req.body.dates?.eventDate || null);
+    if (finalHallId) {
       const itemId = `${bookingId}-hall`;
       mockClient.tables.booking_items.set(itemId, {
         id: itemId,
         booking_id: bookingId,
         item_type: 'function-hall',
-        item_id: hallId,
-        usage_date: eventDate || req.body.checkIn
+        item_id: finalHallId,
+        usage_date: eventDate || checkIn
       });
     }
 
@@ -256,6 +426,28 @@ router.patch('/bookings/:id', async (req, res) => {
       }
     }
     
+    // Build function hall metadata if updating function hall booking
+    const { buildFunctionHallMetadata } = await import('../utils/functionHallMetadata.js');
+    const fhMetadata = buildFunctionHallMetadata({
+      hallId: updates.hallId || updates.selectedHall,
+      hallName: updates.hallName,
+      eventName: updates.eventName,
+      eventType: updates.eventType,
+      setupType: updates.setupType,
+      decorationTheme: updates.decorationTheme,
+      organization: updates.organization,
+      startTime: updates.startTime,
+      endTime: updates.endTime,
+      soundSystemRequired: updates.soundSystemRequired,
+      projectorRequired: updates.projectorRequired,
+      cateringRequired: updates.cateringRequired,
+      equipmentAddons: updates.equipmentAddons
+    });
+    
+    if (fhMetadata) {
+      console.log('[MockBookings] Function hall metadata for update:', JSON.stringify(fhMetadata, null, 2));
+    }
+    
     // Update booking
     const updatedBooking = {
       ...existingBooking,
@@ -270,6 +462,15 @@ router.patch('/bookings/:id', async (req, res) => {
       category: updates.category || existingBooking.category || 'rooms', // Preserve category or default to rooms
       updated_at: new Date().toISOString()
     };
+    
+    // Update function hall metadata if provided, otherwise preserve existing
+    if (fhMetadata) {
+      updatedBooking.function_hall_metadata = fhMetadata;
+      console.log('[MockBookings] Updated booking includes function_hall_metadata');
+    } else if (updates.hallId || updates.selectedHall) {
+      // If hall is being updated but metadata is null, preserve existing metadata or set to empty
+      updatedBooking.function_hall_metadata = existingBooking.function_hall_metadata || null;
+    }
     
     mockClient.tables.bookings.set(id, updatedBooking);
     
@@ -343,7 +544,9 @@ router.patch('/bookings/:id', async (req, res) => {
     }
     
     // Update function halls if provided
-    if (updates.selectedHall) {
+    const hallId = updates.hallId || updates.selectedHall;
+    if (hallId) {
+      console.log('[MockBookings] Updating function hall item:', hallId);
       // Remove old function hall items
       Array.from(mockClient.tables.booking_items.values())
         .filter(item => item.booking_id === id && item.item_type === 'function-hall')
@@ -351,12 +554,18 @@ router.patch('/bookings/:id', async (req, res) => {
       
       // Add new function hall item
       const itemId = `${id}-hall`;
+      const eventDate = (updates.checkIn && updates.checkOut && updates.checkIn === updates.checkOut) 
+        ? updates.checkIn 
+        : (updates.eventDate || updates.dates?.eventDate || updates.checkIn || existingBooking.check_in);
+      
       mockClient.tables.booking_items.set(itemId, {
         id: itemId,
         booking_id: id,
         item_type: 'function-hall',
-        item_id: updates.selectedHall
+        item_id: hallId,
+        usage_date: eventDate
       });
+      console.log('[MockBookings] Function hall item updated:', { itemId, hallId, usage_date: eventDate });
     }
     
     // Get updated booking items
@@ -641,9 +850,9 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
     // Define available items based on type
     let allItems;
     if (itemType === 'room') {
-      allItems = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
+      allItems = ['Room 01', 'Room 02', 'Room 03', 'Room 04'];
     } else if (itemType === 'cottage') {
-      allItems = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+      allItems = ['Standard Cottage', 'Open Cottage', 'Family Cottage'];
     } else if (itemType === 'function-hall') {
       allItems = ['Grand Function Hall', 'Intimate Function Hall'];
     } else {

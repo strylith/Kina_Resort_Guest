@@ -189,19 +189,48 @@ export async function MyBookingsPage() {
         preFillData.eventDate = fhItem.usage_date || booking.check_in;
         preFillData.hallId = fhItem.item_id;
         preFillData.hallName = fhItem.item_id;
-        // If booking contains meta fields (dev/mock), propagate them for seamless re-edit
-        preFillData.eventName = booking.event_name || booking.selections?.eventName;
-        preFillData.eventType = booking.event_type || booking.selections?.eventType;
-        preFillData.setupType = booking.setup_type || booking.selections?.setupType;
-        preFillData.startTime = booking.start_time || booking.dates?.startTime;
-        preFillData.endTime = booking.end_time || booking.dates?.endTime;
-        preFillData.decorationTheme = booking.decoration_theme || booking.selections?.decorationTheme;
-        preFillData.organization = booking.organization || booking.selections?.organization;
+        
+        // Extract function hall metadata from bookings.function_hall_metadata JSONB column
+        const fhMetadata = booking.function_hall_metadata || {};
+        console.log('[Re-Edit] Function hall metadata from booking:', fhMetadata);
+        
+        // Use metadata from database if available, fallback to legacy fields
+        preFillData.eventName = fhMetadata.eventName || booking.event_name || booking.selections?.eventName || null;
+        preFillData.eventType = fhMetadata.eventType || booking.event_type || booking.selections?.eventType || null;
+        preFillData.setupType = fhMetadata.setupType || booking.setup_type || booking.selections?.setupType || null;
+        preFillData.startTime = fhMetadata.startTime || booking.start_time || booking.dates?.startTime || null;
+        preFillData.endTime = fhMetadata.endTime || booking.end_time || booking.dates?.endTime || null;
+        preFillData.decorationTheme = fhMetadata.decorationTheme || booking.decoration_theme || booking.selections?.decorationTheme || null;
+        preFillData.organization = fhMetadata.organization || booking.organization || booking.selections?.organization || null;
         preFillData.guestCount = (typeof booking.guests === 'object' ? booking.guests.total : booking.guests) || null;
-        preFillData.soundSystemRequired = booking.sound_system_required || booking.selections?.soundSystemRequired || false;
-        preFillData.projectorRequired = booking.projector_required || booking.selections?.projectorRequired || false;
-        preFillData.cateringRequired = booking.catering_required || booking.selections?.cateringRequired || false;
-        preFillData.equipmentAddons = booking.equipment_addons || booking.selections?.equipmentAddons || [];
+        preFillData.soundSystemRequired = fhMetadata.soundSystemRequired !== undefined ? fhMetadata.soundSystemRequired : (booking.sound_system_required || booking.selections?.soundSystemRequired || false);
+        preFillData.projectorRequired = fhMetadata.projectorRequired !== undefined ? fhMetadata.projectorRequired : (booking.projector_required || booking.selections?.projectorRequired || false);
+        preFillData.cateringRequired = fhMetadata.cateringRequired !== undefined ? fhMetadata.cateringRequired : (booking.catering_required || booking.selections?.cateringRequired || false);
+        preFillData.equipmentAddons = Array.isArray(fhMetadata.equipmentAddons) ? fhMetadata.equipmentAddons : (Array.isArray(booking.equipment_addons) ? booking.equipment_addons : (Array.isArray(booking.selections?.equipmentAddons) ? booking.selections.equipmentAddons : []));
+        
+        // Extract specialRequests - it's stored in booking.special_requests (string field)
+        preFillData.specialRequests = booking.special_requests || null;
+        console.log('[Re-Edit] Special requests extracted:', preFillData.specialRequests);
+        
+        // Use hallName from metadata if available
+        if (fhMetadata.hallName) {
+          preFillData.hallName = fhMetadata.hallName;
+        }
+        
+        console.log('[Re-Edit] Function hall prefill data extracted:', {
+          eventName: preFillData.eventName,
+          eventType: preFillData.eventType,
+          setupType: preFillData.setupType,
+          startTime: preFillData.startTime,
+          endTime: preFillData.endTime,
+          decorationTheme: preFillData.decorationTheme,
+          organization: preFillData.organization,
+          soundSystemRequired: preFillData.soundSystemRequired,
+          projectorRequired: preFillData.projectorRequired,
+          cateringRequired: preFillData.cateringRequired,
+          equipmentAddons: preFillData.equipmentAddons,
+          specialRequests: preFillData.specialRequests
+        });
       }
       
       console.log('[Re-Edit] Pre-fill data prepared:', preFillData);
@@ -261,7 +290,25 @@ export async function MyBookingsPage() {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
     
-    const packageName = booking.packages?.title || 'Standard Room';
+    // Log package lookup for debugging
+    const category = booking.category || booking.packages?.category || '';
+    console.log('[Table] Package lookup for booking details:', {
+      bookingId: booking.id,
+      package_id: booking.package_id,
+      category: category,
+      hasPackages: !!booking.packages,
+      packageTitle: booking.packages?.title,
+      packageCategory: booking.packages?.category
+    });
+    
+    // Map category to simplified display name
+    const displayNameMap = {
+      'rooms': 'Room',
+      'cottages': 'Cottage',
+      'function-halls': 'Function Hall',
+      'function-hall': 'Function Hall'
+    };
+    const packageName = displayNameMap[category] || 'Room';
     const packageType = booking.packages?.category || 'room';
     
     // Parse guests data
@@ -421,17 +468,58 @@ export async function MyBookingsPage() {
     }
 
     return bookings.map(booking => {
-      const packageName = booking.packages?.title || 'Standard Room';
+      // Log package lookup for debugging
+      console.log('[Table] Package lookup for booking row:', {
+        bookingId: booking.id,
+        package_id: booking.package_id,
+        category: booking.category,
+        hasPackages: !!booking.packages,
+        packageTitle: booking.packages?.title,
+        packageCategory: booking.packages?.category,
+        fallback: 'Standard Room'
+      });
+      
+      // Map category to simplified display name
+      const category = booking.category || booking.packages?.category || '';
+      const displayNameMap = {
+        'rooms': 'Room',
+        'cottages': 'Cottage',
+        'function-halls': 'Function Hall',
+        'function-hall': 'Function Hall'
+      };
+      const packageName = displayNameMap[category] || 'Room';
       const packageType = booking.packages?.category || 'room';
       const statusClass = booking.status === 'confirmed' ? 'confirmed' : 
                          booking.status === 'pending' ? 'pending' : 'cancelled';
       
-      // Parse guests
+      // Parse guests - check category to determine format (category already declared above)
+      const isFunctionHall = category === 'function-halls' || category === 'function-hall';
+      
+      console.log('[generateBookingRows] Processing booking:', {
+        id: booking.id,
+        category,
+        isFunctionHall,
+        guests: booking.guests,
+        guestsType: typeof booking.guests
+      });
+      
       let guestsDisplay = '';
       if (typeof booking.guests === 'object') {
-        guestsDisplay = `${booking.guests.adults || 0}A, ${booking.guests.children || 0}C`;
+        // Function halls use {total: X} format
+        if (isFunctionHall && booking.guests.total !== undefined) {
+          guestsDisplay = `${booking.guests.total} Guests`;
+          console.log('[generateBookingRows] Function hall - using total:', booking.guests.total);
+        } else if (booking.guests.adults !== undefined || booking.guests.children !== undefined) {
+          // Rooms and cottages use {adults: X, children: Y} format
+          guestsDisplay = `${booking.guests.adults || 0}A, ${booking.guests.children || 0}C`;
+          console.log('[generateBookingRows] Room/cottage - using adults/children:', guestsDisplay);
+        } else {
+          guestsDisplay = 'N/A';
+          console.warn('[generateBookingRows] Unknown guests format:', booking.guests);
+        }
       } else {
         guestsDisplay = booking.guests || 'N/A';
+        console.log('[generateBookingRows] Guests is not an object:', guestsDisplay);
       }
       
       // Extract actual item names from booking_items array
@@ -458,8 +546,7 @@ export async function MyBookingsPage() {
       
       const itemsDisplay = itemsParts.join(' + ') || 'N/A';
       
-      // Derive category for display tweaks
-      const category = booking.category || booking.packages?.category || '';
+      // Derive category for display tweaks (category already declared above)
       const isCottage = category === 'cottages' || category === 'cottage';
       const checkInDisp = new Date(booking.check_in).toLocaleDateString();
       const checkOutDisp = isCottage ? '-' : new Date(booking.check_out).toLocaleDateString();
@@ -504,7 +591,7 @@ export async function MyBookingsPage() {
             <thead>
               <tr>
                 <th>Booking ID</th>
-                <th>Package Name</th>
+                <th>Type</th>
                 <th>Rooms/Cottages</th>
                 <th>Check-in</th>
                 <th>Check-out</th>
@@ -528,7 +615,7 @@ export async function MyBookingsPage() {
             <thead>
               <tr>
                 <th>Booking ID</th>
-                <th>Package Name</th>
+                <th>Type</th>
                 <th>Rooms/Cottages</th>
                 <th>Check-in</th>
                 <th>Check-out</th>

@@ -1,6 +1,7 @@
 import express from 'express';
 import { db } from '../db/databaseClient.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { buildFunctionHallMetadata } from '../utils/functionHallMetadata.js';
 
 const router = express.Router();
 
@@ -124,9 +125,9 @@ router.get('/availability/:packageId', async (req, res) => {
     let allItems;
     
     if (itemType === 'room') {
-      allItems = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
+      allItems = ['Room 01', 'Room 02', 'Room 03', 'Room 04'];
     } else if (itemType === 'cottage') {
-      allItems = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+      allItems = ['Standard Cottage', 'Open Cottage', 'Family Cottage'];
     } else if (itemType === 'function-hall') {
       try {
         const { data: halls } = await db
@@ -340,12 +341,31 @@ router.get('/', async (req, res) => {
       // Fetch package info
       let packageInfo = null;
       if (booking.package_id) {
-        const { data: pkg } = await db
+        const { data: pkg, error: pkgError } = await db
           .from('packages')
           .select('*')
           .eq('id', booking.package_id)
           .single();
-        packageInfo = pkg;
+        if (pkgError) {
+          console.error('[Bookings] Package lookup failed:', {
+            bookingId: booking.id,
+            package_id: booking.package_id,
+            error: pkgError.message
+          });
+        } else {
+          packageInfo = pkg;
+          console.log('[Bookings] Package found:', {
+            bookingId: booking.id,
+            package_id: booking.package_id,
+            packageTitle: pkg?.title,
+            packageCategory: pkg?.category
+          });
+        }
+      } else {
+        console.warn('[Bookings] Booking missing package_id:', {
+          bookingId: booking.id,
+          category: booking.category
+        });
       }
 
       return {
@@ -429,10 +449,89 @@ router.post('/', async (req, res) => {
     // Validate guests has at least one person
     const totalGuests = (guests.adults || 0) + (guests.children || 0);
     if (totalGuests === 0) {
-      console.log('[Booking] Total guests is 0');
+      console.warn('[Booking] Validation failed:', {
+        field: 'guests',
+        error: 'At least one guest must be specified',
+        userId: userId,
+        timestamp: new Date().toISOString()
+      });
       return res.status(400).json({
         success: false,
         error: 'At least one guest must be specified'
+      });
+    }
+    
+    // Validate contact number - must be exactly 11 digits
+    if (contactNumber) {
+      const digitsOnly = String(contactNumber).replace(/\D/g, '');
+      if (digitsOnly.length !== 11) {
+        console.warn('[Booking] Validation failed:', {
+          field: 'contactNumber',
+          value: contactNumber,
+          digitCount: digitsOnly.length,
+          error: 'Contact number must be exactly 11 digits',
+          userId: userId,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Contact number must be exactly 11 digits (received ${digitsOnly.length} digits)`
+        });
+      }
+    } else {
+      console.warn('[Booking] Validation failed:', {
+        field: 'contactNumber',
+        error: 'Contact number is required',
+        userId: userId,
+        timestamp: new Date().toISOString()
+      });
+      return res.status(400).json({
+        success: false,
+        error: 'Contact number is required'
+      });
+    }
+    
+    // Validate room capacity if per-room guests provided
+    const ROOM_CAPACITY = 4; // Maximum guests per room
+    if (Array.isArray(perRoomGuests) && perRoomGuests.length > 0) {
+      for (const roomGuest of perRoomGuests) {
+        const roomAdults = roomGuest.adults || 0;
+        const roomChildren = roomGuest.children || 0;
+        const roomTotal = roomAdults + roomChildren;
+        
+        if (roomTotal > ROOM_CAPACITY) {
+          console.warn('[Booking] Validation failed:', {
+            field: 'perRoomGuests',
+            roomId: roomGuest.roomId || 'unknown',
+            adults: roomAdults,
+            children: roomChildren,
+            total: roomTotal,
+            capacity: ROOM_CAPACITY,
+            error: `Room capacity exceeded: ${roomTotal} guests exceeds maximum of ${ROOM_CAPACITY}`,
+            userId: userId,
+            timestamp: new Date().toISOString()
+          });
+          return res.status(400).json({
+            success: false,
+            error: `Room ${roomGuest.roomId || 'unknown'} exceeds capacity: ${roomTotal} guests (maximum ${ROOM_CAPACITY} allowed)`
+          });
+        }
+      }
+    } else if (totalGuests > ROOM_CAPACITY) {
+      // Validate main guests object for single room bookings
+      console.warn('[Booking] Validation failed:', {
+        field: 'guests',
+        adults: guests.adults || 0,
+        children: guests.children || 0,
+        total: totalGuests,
+        capacity: ROOM_CAPACITY,
+        error: `Guest count exceeds room capacity: ${totalGuests} guests exceeds maximum of ${ROOM_CAPACITY}`,
+        userId: userId,
+        timestamp: new Date().toISOString()
+      });
+      return res.status(400).json({
+        success: false,
+        error: `Guest count exceeds room capacity: ${totalGuests} guests (maximum ${ROOM_CAPACITY} allowed per room)`
       });
     }
     
@@ -441,7 +540,8 @@ router.post('/', async (req, res) => {
       checkIn, 
       checkOut, 
       totalGuests,
-      perRoomGuests: perRoomGuests?.length || 0
+      perRoomGuests: perRoomGuests?.length || 0,
+      contactNumberLength: String(contactNumber).replace(/\D/g, '').length
     });
 
     // Prevent duplicate cottage items in same request
@@ -522,7 +622,66 @@ router.post('/', async (req, res) => {
       });
     }
     
-    console.log(`[Booking] Package found: ${packageData.title} (ID: ${packageData.id})`);
+    console.log(`[Booking] Package found: ${packageData.title} (ID: ${packageData.id}), Category: ${packageData.category}`);
+    
+    // Validate cottage capacity if this is a cottage booking
+    const COTTAGE_CAPACITY = 8; // Maximum guests per cottage
+    if (packageData.category === 'cottages') {
+      if (totalGuests > COTTAGE_CAPACITY) {
+        console.warn('[Booking] Validation failed:', {
+          field: 'guests',
+          category: 'cottages',
+          adults: guests.adults || 0,
+          children: guests.children || 0,
+          total: totalGuests,
+          capacity: COTTAGE_CAPACITY,
+          error: `Guest count exceeds cottage capacity: ${totalGuests} guests exceeds maximum of ${COTTAGE_CAPACITY}`,
+          userId: userId,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Guest count exceeds cottage capacity: ${totalGuests} guests (maximum ${COTTAGE_CAPACITY} allowed per cottage)`
+        });
+      }
+    }
+    
+    // Validate function hall capacity if this is a function hall booking
+    const FUNCTION_HALL_MAX_CAPACITY = 150; // Maximum guests per function hall
+    if (packageData.category === 'function-halls') {
+      // Function halls use guests.total instead of adults + children
+      const functionHallGuests = guests.total || totalGuests;
+      if (functionHallGuests > FUNCTION_HALL_MAX_CAPACITY) {
+        console.warn('[Booking] Validation failed:', {
+          field: 'guests',
+          category: 'function-halls',
+          total: functionHallGuests,
+          capacity: FUNCTION_HALL_MAX_CAPACITY,
+          error: `Guest count exceeds function hall maximum capacity: ${functionHallGuests} guests exceeds maximum of ${FUNCTION_HALL_MAX_CAPACITY}`,
+          userId: userId,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Guest count exceeds function hall maximum capacity: ${functionHallGuests} guests (maximum ${FUNCTION_HALL_MAX_CAPACITY} allowed)`
+        });
+      }
+      // Log warning if exceeds recommended but within max (don't block, just log)
+      const FUNCTION_HALL_RECOMMENDED_CAPACITY = 100;
+      if (functionHallGuests > FUNCTION_HALL_RECOMMENDED_CAPACITY && functionHallGuests <= FUNCTION_HALL_MAX_CAPACITY) {
+        const excessGuests = functionHallGuests - FUNCTION_HALL_RECOMMENDED_CAPACITY;
+        const units = Math.ceil(excessGuests / 10);
+        console.log('[Booking] Function hall booking exceeds recommended capacity:', {
+          category: 'function-halls',
+          total: functionHallGuests,
+          recommended: FUNCTION_HALL_RECOMMENDED_CAPACITY,
+          excess: excessGuests,
+          extraChairsUnits: units,
+          userId: userId,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
 
     // Create main booking record
     // Note: per_room_guests and selected_cottages are stored in booking_items table
@@ -539,6 +698,17 @@ router.post('/', async (req, res) => {
       status: 'pending',
       created_at: new Date().toISOString()
     };
+    
+    // Store function hall metadata if this is a function hall booking
+    const fhMetadata = buildFunctionHallMetadata({
+      hallId, hallName, eventName, eventType, setupType, decorationTheme,
+      organization, startTime, endTime, soundSystemRequired, projectorRequired,
+      cateringRequired, equipmentAddons
+    });
+    if (fhMetadata) {
+      bookingDataToInsert.function_hall_metadata = fhMetadata;
+      console.log('[Booking] Function hall metadata to save:', JSON.stringify(fhMetadata, null, 2));
+    }
     
     console.log('[Booking] Inserting booking data:', JSON.stringify(bookingDataToInsert, null, 2));
     
@@ -564,7 +734,7 @@ router.post('/', async (req, res) => {
       const roomItems = perRoomGuests.map(room => ({
         booking_id: booking.id,
         item_type: 'room',
-        item_id: room.roomId, // e.g., "Room A1"
+        item_id: room.roomId, // e.g., "Room 01"
         guest_name: room.guestName,
         adults: room.adults,
         children: room.children
@@ -594,6 +764,7 @@ router.post('/', async (req, res) => {
         usage_date: checkIn // event is single-day; checkIn==checkOut
       };
       console.log('[Booking] Creating function-hall item:', JSON.stringify(hallItem));
+      console.log('[Booking] Function hall metadata saved in bookings.function_hall_metadata');
       const { error: hallErr } = await db
         .from('booking_items')
         .insert([hallItem]);
@@ -787,7 +958,21 @@ router.patch('/:id', async (req, res) => {
       contactNumber,
       specialRequests,
       selectedCottages,
-      cottageDates
+      cottageDates,
+      // Function hall fields
+      hallId,
+      hallName,
+      eventName,
+      eventType,
+      setupType,
+      startTime,
+      endTime,
+      decorationTheme,
+      organization,
+      soundSystemRequired,
+      projectorRequired,
+      cateringRequired,
+      equipmentAddons
     } = req.body;
 
     console.log('[Booking] PATCH request for booking:', id);
@@ -825,6 +1010,17 @@ router.patch('/:id', async (req, res) => {
     if (paymentMode) updateData.payment_mode = paymentMode;
     if (contactNumber) updateData.contact_number = contactNumber;
     if (specialRequests !== undefined) updateData.special_requests = specialRequests;
+    
+    // Update function hall metadata if provided
+    const fhMetadata = buildFunctionHallMetadata({
+      hallId, hallName, eventName, eventType, setupType, decorationTheme,
+      organization, startTime, endTime, soundSystemRequired, projectorRequired,
+      cateringRequired, equipmentAddons
+    });
+    if (fhMetadata) {
+      updateData.function_hall_metadata = fhMetadata;
+      console.log('[Booking] Updating function hall metadata:', JSON.stringify(fhMetadata, null, 2));
+    }
 
     // Update booking
     const { data, error } = await db

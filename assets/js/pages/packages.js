@@ -1205,7 +1205,7 @@ function initializeCategorySection(sectionId, packages) {
       price: '₱5,500/night',
       capacity: 4,
       availableCount: '4 rooms',
-      description: 'Comfortable rooms with air conditioning, private bathroom, and garden view. All 4 rooms are identically designed with modern amenities and stunning garden views.',
+      description: 'Comfortable rooms with air conditioning, family-sized bed and private bathroom. All 4 rooms are identically designed with modern amenities and stunning garden views.',
       category: 'rooms',
       image: 'images/kina1.jpg'
     };
@@ -1477,7 +1477,7 @@ function createRoomSelectionCard(roomId) {
     </div>
     <div class="room-card-content">
       <h4>${roomId}</h4>
-      <p class="room-price">₱5,500/night</p>
+      <p class="room-price">₱1,500/night</p>
       <button class="room-select-btn">Select Room</button>
     </div>
   `;
@@ -1636,14 +1636,14 @@ async function fetchCottageAvailability(visitDate) {
     // Default: all available (only if no data from API)
     console.warn('[fetchCottageAvailability] No data from API, defaulting to all available');
     return {
-      availableCottages: ['Standard Cottage', 'Garden Cottage', 'Family Cottage'],
+      availableCottages: ['Standard Cottage', 'Open Cottage', 'Family Cottage'],
       bookedCottages: [],
       status: 'cottage-available'
     };
   } catch (error) {
     console.error('[fetchCottageAvailability] Error:', error);
     return {
-      availableCottages: ['Standard Cottage', 'Garden Cottage', 'Family Cottage'],
+      availableCottages: ['Standard Cottage', 'Open Cottage', 'Family Cottage'],
       bookedCottages: [],
       status: 'cottage-available'
     };
@@ -1687,7 +1687,7 @@ window.showAvailableCottages = async function(visitDate) {
   const availabilityData = await fetchCottageAvailability(visitDate);
   const availableCottages = availabilityData.availableCottages || [];
   const bookedCottages = availabilityData.bookedCottages || [];
-  const allCottages = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+  const allCottages = ['Standard Cottage', 'Open Cottage', 'Family Cottage'];
   
   console.log('='.repeat(60));
   console.log('[showAvailableCottages] RENDERING COTTAGE SELECTION');

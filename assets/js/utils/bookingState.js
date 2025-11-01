@@ -11,23 +11,23 @@ export const bookingState = {
   
   // Mock availability data (consistent with calendar modal)
   mockReservationData: {
-    'Room A1': 8,
-    'Room A2': 12,
-    'Room A3': 6,
-    'Room A4': 15,
-    'Standard Cottage': 6,
-    'Garden Cottage': 4,
-    'Family Cottage': 7
+    'Room 01': 8,
+    'Room 02': 12,
+    'Room 03': 6,
+    'Room 04': 15,
+    'Standard Cottage': 8,
+    'Open Cottage': 8,
+    'Family Cottage': 8
   },
   
   // Room types
-  allRooms: ['Room A1', 'Room A2', 'Room A3', 'Room A4'],
+  allRooms: ['Room 01', 'Room 02', 'Room 03', 'Room 04'],
   
   // Function halls
   allFunctionHalls: ['Grand Function Hall', 'Intimate Function Hall'],
   
   // Cottage types
-  allCottages: ['Standard Cottage', 'Garden Cottage', 'Family Cottage'],
+  allCottages: ['Standard Cottage', 'Open Cottage', 'Family Cottage'],
   
   async setDates(checkin, checkout) {
     this.dates.checkin = checkin;

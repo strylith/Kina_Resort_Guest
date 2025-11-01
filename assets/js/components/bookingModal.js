@@ -3,6 +3,24 @@
 
 import { bookingState } from '../utils/bookingState.js';
 
+// Constants
+const ROOM_CAPACITY = 4; // Maximum guests per room
+const COTTAGE_CAPACITY = 8; // Maximum guests per cottage
+const FUNCTION_HALL_RECOMMENDED_CAPACITY = 100; // Recommended guests per function hall
+const FUNCTION_HALL_MAX_CAPACITY = 150; // Maximum guests per function hall
+const ROOM_PRICE = 1500; // Price per room per night (₱1,500)
+const COTTAGE_PRICE = 700; // Price per cottage (₱700)
+const CONTACT_NUMBER_LENGTH = 11; // Required contact number length in digits
+
+// Function Hall Pricing Constants
+const FUNCTION_HALL_BASE_PRICE_INTIMATE = 10000;
+const FUNCTION_HALL_BASE_PRICE_GRAND = 15000;
+const FUNCTION_HALL_SOUND_SYSTEM_PRICE = 2400;
+const FUNCTION_HALL_PROJECTOR_PRICE = 2000;
+const FUNCTION_HALL_CATERING_PRICE_PER_HEAD = 450;
+const FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE = 70; // Price per 10 guests over recommended
+const FUNCTION_HALL_LED_LIGHTING_PRICE = 2500;
+
 let currentBookingModal = null;
 let bookingFormState = {
   reservationType: 'room',
@@ -58,26 +76,26 @@ function resetBookingModalState() {
 }
 
 // Room types for selection
-const roomTypes = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
+const roomTypes = ['Room 01', 'Room 02', 'Room 03', 'Room 04'];
 const cottageTypes = ['Beachfront Cottage', 'Garden View Cottage', 'Family Cottage'];
 const functionHallTypes = ['Grand Function Hall', 'Intimate Function Hall'];
 
 // Mock reservation data for consistent availability
 const mockReservationData = {
-  'Room A1': 8,
-  'Room A2': 12,
-  'Room A3': 6,
-  'Room A4': 15,
+  'Room 01': 8,
+  'Room 02': 12,
+  'Room 03': 6,
+  'Room 04': 15,
   'Grand Function Hall': 5,
   'Intimate Function Hall': 7
 };
 
 // Mock booking database for availability checking
 const mockBookings = {
-  'Room A1': [],
-  'Room A2': [],
-  'Room A3': [],
-  'Room A4': []
+  'Room 01': [],
+  'Room 02': [],
+  'Room 03': [],
+  'Room 04': []
 };
 
 // Check if room is available for given dates (using database)
@@ -171,6 +189,41 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
     hasPreFillData: !!preFillData
   });
   
+  // Check authentication (allow edit mode to proceed as it's already authenticated)
+  if (!editMode) {
+    const authState = window.getAuthState ? window.getAuthState() : { isLoggedIn: false };
+    if (!authState.isLoggedIn) {
+      console.log('[openBookingModal] User not authenticated, redirecting to login');
+      
+      // Store booking modal parameters for after login
+      const bookingIntent = {
+        initialType,
+        packageTitle,
+        preFillData,
+        categoryArg,
+        timestamp: Date.now()
+      };
+      sessionStorage.setItem('bookingModalIntent', JSON.stringify(bookingIntent));
+      
+      // Show toast message
+      if (window.showToast) {
+        window.showToast('Please login to continue booking', 'info');
+      } else {
+        alert('Please login to continue booking');
+      }
+      
+      // Get current page for return URL
+      const currentHash = window.location.hash || '#/packages';
+      const returnUrl = currentHash.includes('#/auth') || currentHash.includes('#/register') 
+        ? '#/packages' 
+        : currentHash;
+      
+      // Redirect to login with return URL
+      window.location.hash = `#/auth?return=${encodeURIComponent(returnUrl)}`;
+      return;
+    }
+  }
+  
   // Hide continue button while modal is open
   const floatingBtn = document.getElementById('floating-continue-btn');
   if (floatingBtn) {
@@ -246,6 +299,8 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
     }
     // Map function-hall specific prefill fields into a simple formData cache for rendering defaults
     if (initialType === 'function-hall') {
+      console.log('[BookingModal] Setting up function hall formData from preFillData:', preFillData);
+      
       bookingFormState.formData = {
         eventDate: preFillData.eventDate || preFillData.date || null,
         startTime: preFillData.startTime || null,
@@ -261,8 +316,25 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
         soundSystemRequired: !!preFillData.soundSystemRequired,
         projectorRequired: !!preFillData.projectorRequired,
         cateringRequired: !!preFillData.cateringRequired,
-        equipmentAddons: Array.isArray(preFillData.equipmentAddons) ? preFillData.equipmentAddons : []
+        equipmentAddons: Array.isArray(preFillData.equipmentAddons) ? preFillData.equipmentAddons : [],
+        specialRequests: preFillData.specialRequests || null
       };
+      
+      console.log('[BookingModal] Function hall formData set:', {
+        eventName: bookingFormState.formData.eventName,
+        eventType: bookingFormState.formData.eventType,
+        setupType: bookingFormState.formData.setupType,
+        startTime: bookingFormState.formData.startTime,
+        endTime: bookingFormState.formData.endTime,
+        decorationTheme: bookingFormState.formData.decorationTheme,
+        organization: bookingFormState.formData.organization,
+        soundSystemRequired: bookingFormState.formData.soundSystemRequired,
+        projectorRequired: bookingFormState.formData.projectorRequired,
+        cateringRequired: bookingFormState.formData.cateringRequired,
+        equipmentAddons: bookingFormState.formData.equipmentAddons,
+        specialRequests: bookingFormState.formData.specialRequests
+      });
+      
       // Also reflect hall info in preFillDates used by selected-hall header
       bookingFormState.preFillDates = {
         ...(bookingFormState.preFillDates || {}),
@@ -270,6 +342,8 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
         hallId: preFillData.hallId || bookingFormState.preFillDates?.hallId || null,
         hallName: preFillData.hallName || bookingFormState.preFillDates?.hallName || null
       };
+      
+      console.log('[BookingModal] Function hall preFillDates set:', bookingFormState.preFillDates);
     }
   } else {
     bookingFormState.preFillDates = null;
@@ -612,17 +686,20 @@ function renderCottageFields() {
       <div class="guests-group">
         <div class="form-field">
           <label for="cottage-adults" class="form-label">Number of Adults *</label>
-          <input type="number" id="cottage-adults" name="cottageAdults" class="form-input" min="1" value="1" required>
+          <input type="number" id="cottage-adults" name="cottageAdults" class="form-input" min="1" value="1" required onchange="validateCottageCapacity('cottage-adults')" oninput="validateCottageCapacity('cottage-adults')" onfocus="validateCottageCapacity('cottage-adults')">
           <div class="form-error" id="cottage-adults-error"></div>
         </div>
         
         <div class="form-field">
           <label for="cottage-children" class="form-label">Number of Children</label>
-          <input type="number" id="cottage-children" name="cottageChildren" class="form-input" min="0" value="0">
+          <input type="number" id="cottage-children" name="cottageChildren" class="form-input" min="0" value="0" onchange="validateCottageCapacity('cottage-children')" oninput="validateCottageCapacity('cottage-children')" onfocus="validateCottageCapacity('cottage-children')">
+          <div class="form-error" id="cottage-children-error"></div>
         </div>
       </div>
       
       ${generateSelectedCottagesDisplay()}
+      
+      ${renderCottageCostSummary()}
       
     </div>
     
@@ -711,8 +788,8 @@ function renderFunctionHallFields() {
       </div>
       
       <div class="form-field">
-        <label for="event-guests" class="form-label">Number of Guests *</label>
-        <input type="number" id="event-guests" name="eventGuests" class="form-input" min="1" required data-required="true" value="${fh.guestCount || ''}">
+        <label for="event-guests" class="form-label">Number of Guests * (Recommended: ${FUNCTION_HALL_RECOMMENDED_CAPACITY}, Max: ${FUNCTION_HALL_MAX_CAPACITY})</label>
+        <input type="number" id="event-guests" name="eventGuests" class="form-input" min="1" max="${FUNCTION_HALL_MAX_CAPACITY}" required data-required="true" value="${fh.guestCount || ''}" onchange="validateFunctionHallGuests('event-guests'); updateFunctionHallCost()" oninput="validateFunctionHallGuests('event-guests'); updateFunctionHallCost()" onfocus="validateFunctionHallGuests('event-guests')">
         <div class="form-error" id="event-guests-error"></div>
       </div>
       
@@ -725,15 +802,15 @@ function renderFunctionHallFields() {
         <label class="form-label">Equipment Requirements</label>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" id="sound-system" name="soundSystem" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.soundSystemRequired ? 'checked' : ''}>
+            <input type="checkbox" id="sound-system" name="soundSystem" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.soundSystemRequired ? 'checked' : ''} onchange="updateFunctionHallCost()">
             <span>Sound System Required</span>
           </label>
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" id="projector" name="projector" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.projectorRequired ? 'checked' : ''}>
+            <input type="checkbox" id="projector" name="projector" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.projectorRequired ? 'checked' : ''} onchange="updateFunctionHallCost()">
             <span>Projector/Screen Required</span>
           </label>
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" id="catering-required" name="cateringRequired" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.cateringRequired ? 'checked' : ''}>
+            <input type="checkbox" id="catering-required" name="cateringRequired" value="true" style="width: 18px; height: 18px; cursor: pointer;" ${fh.cateringRequired ? 'checked' : ''} onchange="updateFunctionHallCost()">
             <span>Catering Required</span>
           </label>
         </div>
@@ -743,23 +820,15 @@ function renderFunctionHallFields() {
         <label class="form-label">Additional Equipment Add-ons</label>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" name="equipmentAddons" value="microphone" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('microphone')?'checked':''}>
-            <span>Microphone</span>
-          </label>
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" name="equipmentAddons" value="stage" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('stage')?'checked':''}>
-            <span>Stage</span>
-          </label>
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" name="equipmentAddons" value="lighting" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('lighting')?'checked':''}>
+            <input type="checkbox" name="equipmentAddons" value="lighting" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('lighting')?'checked':''} onchange="updateFunctionHallCost()">
             <span>Lighting</span>
           </label>
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" name="equipmentAddons" value="extra-chairs" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-chairs')?'checked':''}>
+            <input type="checkbox" name="equipmentAddons" value="extra-chairs" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-chairs')?'checked':''} onchange="updateFunctionHallCost()">
             <span>Extra Chairs</span>
           </label>
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" name="equipmentAddons" value="extra-tables" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-tables')?'checked':''}>
+            <input type="checkbox" name="equipmentAddons" value="extra-tables" style="width: 18px; height: 18px; cursor: pointer;" ${(fh.equipmentAddons||[]).includes('extra-tables')?'checked':''} onchange="updateFunctionHallCost()">
             <span>Extra Tables</span>
           </label>
         </div>
@@ -767,29 +836,46 @@ function renderFunctionHallFields() {
       
       <div class="form-field">
         <label for="special-requests" class="form-label">Special Requests</label>
-        <textarea id="special-requests" name="specialRequests" class="form-textarea" rows="3" placeholder="Any special requirements or requests..."></textarea>
+        <textarea id="special-requests" name="specialRequests" class="form-textarea" rows="3" placeholder="Any special requirements or requests...">${fh.specialRequests || ''}</textarea>
       </div>
+      
+      ${renderFunctionHallCostSummary()}
     </div>
     
     ${renderPaymentAndAgreement()}
   `;
 }
 
-// Render cost summary
+// Render cost summary (for room bookings)
 function renderCostSummary() {
   const costs = calculateTotalCost();
   if (!costs || !bookingFormState.selectedRoomsFromFlow?.length) return '';
+  
+  // Calculate cottage price details for display
+  let cottagePriceDetails = '';
+  if (bookingState.selectedCottages.length > 0) {
+    const cottagePrices = bookingState.selectedCottages.map(c => {
+      const info = getCottageInfo(c);
+      return info.price.replace('₱', '');
+    });
+    const uniquePrices = [...new Set(cottagePrices)];
+    if (uniquePrices.length === 1) {
+      cottagePriceDetails = `₱${parseInt(uniquePrices[0]).toLocaleString()}`;
+    } else {
+      cottagePriceDetails = 'various prices';
+    }
+  }
   
   return `
     <div class="booking-cost-summary">
       <h4>Cost Breakdown</h4>
       <div class="cost-line">
-        <span>Rooms (${bookingFormState.selectedRoomsFromFlow?.length || 0} × ₱5,500 × ${costs.nights} nights)</span>
+        <span>Rooms (${bookingFormState.selectedRoomsFromFlow?.length || 0} × ₱${ROOM_PRICE.toLocaleString()} × ${costs.nights} nights)</span>
         <span>₱${costs.roomCost.toLocaleString()}</span>
       </div>
       ${bookingState.selectedCottages.length > 0 ? `
         <div class="cost-line">
-          <span>Cottages (${bookingState.selectedCottages.length} × ${costs.nights} nights)</span>
+          <span>Cottages (${bookingState.selectedCottages.length} × ${cottagePriceDetails} × ${costs.cottageDays || costs.nights} ${costs.cottageDays ? 'days' : 'nights'})</span>
           <span>₱${costs.cottageCost.toLocaleString()}</span>
         </div>
       ` : ''}
@@ -801,13 +887,145 @@ function renderCostSummary() {
   `;
 }
 
+// Render cottage cost summary (for cottage-only bookings)
+function renderCottageCostSummary() {
+  const selectedCottages = bookingState.selectedCottages || [];
+  if (selectedCottages.length === 0) return '';
+  
+  // Calculate total cost from individual cottage prices
+  const totalCost = selectedCottages.reduce((sum, cottageId) => {
+    const info = getCottageInfo(cottageId);
+    const priceNum = parseInt(info.price.replace(/[₱,]/g, '')) || 0;
+    return sum + priceNum;
+  }, 0);
+  
+  // Build price details string
+  const cottagePriceDetails = selectedCottages.length === 1 
+    ? getCottageInfo(selectedCottages[0]).price.replace('₱', '')
+    : 'various prices';
+  
+  return `
+    <div class="booking-cost-summary">
+      <h4>Cost Breakdown</h4>
+      <div class="cost-line">
+        <span>Cottages (${selectedCottages.length} × ${cottagePriceDetails === 'various prices' ? cottagePriceDetails : `₱${parseInt(cottagePriceDetails).toLocaleString()}`})</span>
+        <span>₱${totalCost.toLocaleString()}</span>
+      </div>
+      <div class="cost-total">
+        <span><strong>Total</strong></span>
+        <span><strong>₱${totalCost.toLocaleString()}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
+// Calculate function hall equipment costs
+function calculateFunctionHallEquipmentCost() {
+  const soundSystem = document.getElementById('sound-system')?.checked || false;
+  const projector = document.getElementById('projector')?.checked || false;
+  const catering = document.getElementById('catering-required')?.checked || false;
+  const guestsInput = document.getElementById('event-guests');
+  const guestCount = parseInt(guestsInput?.value || '0') || 0;
+  
+  const equipmentAddons = Array.from(document.querySelectorAll('input[name="equipmentAddons"]:checked')).map(cb => cb.value);
+  const extraChairs = equipmentAddons.includes('extra-chairs');
+  const extraTables = equipmentAddons.includes('extra-tables');
+  const lighting = equipmentAddons.includes('lighting');
+  
+  let total = 0;
+  const items = [];
+  
+  if (soundSystem) {
+    total += FUNCTION_HALL_SOUND_SYSTEM_PRICE;
+    items.push({ name: 'Sound System', price: FUNCTION_HALL_SOUND_SYSTEM_PRICE });
+  }
+  
+  if (projector) {
+    total += FUNCTION_HALL_PROJECTOR_PRICE;
+    items.push({ name: 'Projector/Screen', price: FUNCTION_HALL_PROJECTOR_PRICE });
+  }
+  
+  if (catering && guestCount > 0) {
+    const cateringCost = guestCount * FUNCTION_HALL_CATERING_PRICE_PER_HEAD;
+    total += cateringCost;
+    items.push({ name: `Catering (${guestCount} × ₱${FUNCTION_HALL_CATERING_PRICE_PER_HEAD})`, price: cateringCost });
+  }
+  
+  // Auto-calculate required extra chairs when guests exceed recommended capacity
+  if (guestCount > FUNCTION_HALL_RECOMMENDED_CAPACITY) {
+    const excessGuests = guestCount - FUNCTION_HALL_RECOMMENDED_CAPACITY;
+    const units = Math.ceil(excessGuests / 10);
+    const requiredExtraChairsCost = units * FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE;
+    total += requiredExtraChairsCost;
+    items.push({ 
+      name: `Extra Chairs/Tables (Required: ${excessGuests} guests over recommended = ${units} unit${units > 1 ? 's' : ''} × ₱${FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE})`, 
+      price: requiredExtraChairsCost 
+    });
+  }
+  
+  // Optional extra chairs/tables (manual checkbox selection)
+  if (extraChairs || extraTables) {
+    total += FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE;
+    items.push({ name: 'Extra Chairs/Tables (Additional)', price: FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE });
+  }
+  
+  if (lighting) {
+    total += FUNCTION_HALL_LED_LIGHTING_PRICE;
+    items.push({ name: 'LED Lightings', price: FUNCTION_HALL_LED_LIGHTING_PRICE });
+  }
+  
+  return { items, total };
+}
+
+// Render function hall cost summary
+function renderFunctionHallCostSummary() {
+  const hallName = bookingFormState.preFillDates?.hallName || 'Not selected';
+  const isGrand = hallName.includes('Grand');
+  const basePrice = isGrand ? FUNCTION_HALL_BASE_PRICE_GRAND : FUNCTION_HALL_BASE_PRICE_INTIMATE;
+  
+  const equipment = calculateFunctionHallEquipmentCost();
+  const totalCost = basePrice + equipment.total;
+  
+  return `
+    <div class="booking-cost-summary">
+      <h4>Cost Breakdown</h4>
+      <div class="cost-line">
+        <span>Function Hall (${hallName})</span>
+        <span>₱${basePrice.toLocaleString()}</span>
+      </div>
+      ${equipment.items.map(item => `
+        <div class="cost-line">
+          <span>${item.name}</span>
+          <span>₱${item.price.toLocaleString()}</span>
+        </div>
+      `).join('')}
+      <div class="cost-total">
+        <span><strong>Total</strong></span>
+        <span><strong>₱${totalCost.toLocaleString()}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
+// Update function hall cost breakdown in real-time
+window.updateFunctionHallCost = function() {
+  if (bookingFormState.reservationType !== 'function-hall') return;
+  
+  const costSummaryEl = document.querySelector('.booking-cost-summary');
+  if (costSummaryEl) {
+    costSummaryEl.outerHTML = renderFunctionHallCostSummary();
+  }
+};
+
 // Render payment and agreement section
 function renderPaymentAndAgreement() {
+  // Only show room cost summary for room bookings (cottage has its own)
+  const costSummary = bookingFormState.reservationType === 'room' ? renderCostSummary() : '';
   return `
-    ${renderCostSummary()}
+    ${costSummary}
     
     <div class="form-section">
-      <h3>Payment & Agreement</h3>
+      <h3>Payment</h3>
       
       <div class="form-field">
         <label for="payment-mode" class="form-label">Mode of Payment *</label>
@@ -820,6 +1038,7 @@ function renderPaymentAndAgreement() {
         <div class="form-error" id="payment-mode-error"></div>
       </div>
       
+      ${!bookingFormState.editMode ? `
       <div class="agreement-section">
         <div class="terms-container" id="terms-container">
           <div class="terms-header" onclick="toggleTermsExpansion()">
@@ -845,8 +1064,9 @@ function renderPaymentAndAgreement() {
         </label>
         <div class="form-error" id="agreement-error"></div>
       </div>
+      ` : ''}
       
-      <button type="submit" class="booking-submit-btn">
+      <button type="submit" class="booking-submit-btn" ${!bookingFormState.editMode ? 'disabled style="opacity: 0.5; cursor: not-allowed; background-color: #cccccc;"' : ''}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 12l2 2 4-4"></path>
           ${bookingFormState.editMode ? '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>' : '<path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>'}
@@ -859,6 +1079,95 @@ function renderPaymentAndAgreement() {
     </div>
   `;
 }
+
+// Update submit button state based on agreement checkbox
+function updateSubmitButtonState() {
+  const submitButton = document.querySelector('.booking-submit-btn');
+  
+  if (submitButton) {
+    // In edit mode, agreement is not required (already agreed during initial booking)
+    if (bookingFormState.editMode) {
+      submitButton.disabled = false;
+      submitButton.style.opacity = '1';
+      submitButton.style.cursor = 'pointer';
+      submitButton.style.backgroundColor = '';
+    } else {
+      // New booking mode: require agreement checkbox
+      const agreementCheckbox = document.getElementById('agreement');
+      if (agreementCheckbox) {
+        const isChecked = agreementCheckbox.checked;
+        submitButton.disabled = !isChecked;
+        
+        if (!isChecked) {
+          submitButton.style.opacity = '0.5';
+          submitButton.style.cursor = 'not-allowed';
+          submitButton.style.backgroundColor = '#cccccc';
+        } else {
+          submitButton.style.opacity = '1';
+          submitButton.style.cursor = 'pointer';
+          submitButton.style.backgroundColor = '';
+        }
+      }
+    }
+  }
+}
+
+// Validate room capacity in real-time - uses reusable function
+// activeFieldId: ID of the field currently being edited (to prioritize error display)
+window.validateRoomCapacity = function(roomId = null, activeFieldId = null) {
+  if (roomId) {
+    // Validate specific room
+    const adultsInput = document.getElementById(`${roomId}-adults`);
+    const childrenInput = document.getElementById(`${roomId}-children`);
+    validateSingleRoomCapacity(adultsInput, childrenInput, activeFieldId);
+  } else {
+    // Validate default room inputs
+    const adultsInput = document.getElementById('adults');
+    const childrenInput = document.getElementById('children');
+    validateSingleRoomCapacity(adultsInput, childrenInput, activeFieldId);
+  }
+};
+
+// Validate cottage capacity in real-time - uses reusable function
+// activeFieldId: ID of the field currently being edited (to prioritize error display)
+window.validateCottageCapacity = function(activeFieldId = null) {
+  const adultsInput = document.getElementById('cottage-adults');
+  const childrenInput = document.getElementById('cottage-children');
+  validateSingleCottageCapacity(adultsInput, childrenInput, activeFieldId);
+};
+
+// Validate function hall guest capacity in real-time
+// activeFieldId: ID of the field currently being edited (to prioritize error display)
+window.validateFunctionHallGuests = function(activeFieldId = null) {
+  const guestsInput = document.getElementById('event-guests');
+  if (!guestsInput) return;
+  
+  const guests = parseInt(guestsInput.value || '0') || 0;
+  const guestsId = guestsInput.id || guestsInput.name;
+  
+  // Clear previous errors/warnings
+  clearFieldError(guestsId);
+  guestsInput.classList.remove('error', 'warning');
+  
+  if (guests > FUNCTION_HALL_MAX_CAPACITY) {
+    // Error: exceeds maximum capacity
+    const errorMsg = `Number of guests (${guests}) exceeds maximum capacity of ${FUNCTION_HALL_MAX_CAPACITY}`;
+    showFieldError(guestsId, errorMsg);
+    guestsInput.classList.add('error');
+    return { isValid: false, message: errorMsg };
+  } else if (guests > FUNCTION_HALL_RECOMMENDED_CAPACITY) {
+    // Warning: exceeds recommended but within max (allow submission, show warning)
+    const excessGuests = guests - FUNCTION_HALL_RECOMMENDED_CAPACITY;
+    const units = Math.ceil(excessGuests / 10);
+    const warningMsg = `Number of guests (${guests}) exceeds recommended capacity of ${FUNCTION_HALL_RECOMMENDED_CAPACITY} (maximum ${FUNCTION_HALL_MAX_CAPACITY}). Extra seating charges (${units} units × ₱${FUNCTION_HALL_EXTRA_CHAIRS_TABLES_PRICE}) will apply.`;
+    showFieldError(guestsId, warningMsg);
+    guestsInput.classList.add('warning'); // Use warning class instead of error
+    return { isValid: true, message: warningMsg }; // Allow submission with warning
+  } else {
+    // Within recommended capacity - no issues
+    return { isValid: true, message: '' };
+  }
+};
 
 // Get submit button text based on reservation type and edit mode
 function getSubmitButtonText() {
@@ -918,13 +1227,14 @@ function generatePerRoomGuestInputs() {
       <div class="guests-group">
         <div class="form-field">
           <label for="adults" class="form-label">Number of Adults *</label>
-          <input type="number" id="adults" name="adults" class="form-input" min="1" value="1" required>
+          <input type="number" id="adults" name="adults" class="form-input" min="1" value="1" required onchange="validateRoomCapacity(null, 'adults')" oninput="validateRoomCapacity(null, 'adults')" onfocus="validateRoomCapacity(null, 'adults')">
           <div class="form-error" id="adults-error"></div>
         </div>
         
         <div class="form-field">
           <label for="children" class="form-label">Number of Children</label>
-          <input type="number" id="children" name="children" class="form-input" min="0" value="0">
+          <input type="number" id="children" name="children" class="form-input" min="0" value="0" onchange="validateRoomCapacity(null, 'children')" oninput="validateRoomCapacity(null, 'children')" onfocus="validateRoomCapacity(null, 'children')">
+          <div class="form-error" id="children-error"></div>
         </div>
       </div>
     `;
@@ -953,11 +1263,13 @@ function generatePerRoomGuestInputs() {
         <div class="guests-inputs-row">
           <div class="form-field">
             <label for="${roomId}-adults" class="form-label">Adults *</label>
-            <input type="number" id="${roomId}-adults" name="${roomId}-adults" class="form-input" min="1" max="4" value="${adults}" required onchange="updateTotalGuests()">
+            <input type="number" id="${roomId}-adults" name="${roomId}-adults" class="form-input" min="1" max="4" value="${adults}" required onchange="updateTotalGuests(); validateRoomCapacity('${roomId}', '${roomId}-adults')" oninput="validateRoomCapacity('${roomId}', '${roomId}-adults')" onfocus="validateRoomCapacity('${roomId}', '${roomId}-adults')">
+            <div class="form-error" id="${roomId}-adults-error"></div>
           </div>
           <div class="form-field">
             <label for="${roomId}-children" class="form-label">Children</label>
-            <input type="number" id="${roomId}-children" name="${roomId}-children" class="form-input" min="0" max="3" value="${children}" onchange="updateTotalGuests()">
+            <input type="number" id="${roomId}-children" name="${roomId}-children" class="form-input" min="0" max="3" value="${children}" onchange="updateTotalGuests(); validateRoomCapacity('${roomId}', '${roomId}-children')" oninput="validateRoomCapacity('${roomId}', '${roomId}-children')" onfocus="validateRoomCapacity('${roomId}', '${roomId}-children')">
+            <div class="form-error" id="${roomId}-children-error"></div>
           </div>
         </div>
       </div>
@@ -1170,16 +1482,16 @@ async function renderItemsManagerGrid() {
         <div class="room-selection-grid" style="grid-template-columns: repeat(4, 1fr);">${rooms.map(r => `
           <div class="room-selection-card ${ (bookingFormState.selectedRoomsFromFlow||[]).includes(r) ? 'selected' : '' }" data-room-id="${r}" onclick="toggleManagerRoom('${r}')">
             <div class="room-card-image"><img src="images/kina1.jpg" alt="${r}"><div class="room-selection-indicator"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"M20 6L9 17l-5-5\"></path></svg></div></div>
-            <div class="room-card-content"><h4>${r}</h4><div class="room-price">₱5,500/night</div><button class="room-select-btn">${(bookingFormState.selectedRoomsFromFlow||[]).includes(r) ? 'Selected' : 'Select'}</button></div>
+            <div class="room-card-content"><h4>${r}</h4><div class="room-price">₱${ROOM_PRICE.toLocaleString()}/night</div><button class="room-select-btn">${(bookingFormState.selectedRoomsFromFlow||[]).includes(r) ? 'Selected' : 'Select'}</button></div>
           </div>`).join('')}
         </div>`;
     } else if (category === 'cottages') {
       const visit = dates.date;
       const { checkAvailability } = await import('../utils/api.js');
       const result = await checkAvailability(1, visit, visit, 'cottages');
-      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Open Cottage','Family Cottage'];
       // In manager, show all with unavailable/selected states (same as inline)
-      const all = ['Standard Cottage','Garden Cottage','Family Cottage'];
+      const all = ['Standard Cottage','Open Cottage','Family Cottage'];
       grid.innerHTML = `
         <div class="room-selection-grid" style="grid-template-columns: repeat(3, 1fr);">${all.map(c => {
           const isAvailable = available.includes(c);
@@ -1267,13 +1579,12 @@ async function renderCottageItemsManagerGrid() {
       <div class="room-selection-grid" style="grid-template-columns: repeat(3, 1fr);">
         ${availableCottages.map(cottageId => {
           const isSelected = (bookingFormState.selectedCottagesFromFlow||[]).includes(cottageId);
-          const imageUrl = cottageId.includes('Garden') ? 'images/cottage_2.JPG' : (cottageId.includes('Family') ? 'images/kina1.jpg' : 'images/cottage_1.JPG');
-          const price = cottageId.includes('Garden') ? '₱7,500/day' : (cottageId.includes('Family') ? '₱10,200/day' : '₱9,500/day');
+          const cottageInfo = getCottageInfo(cottageId);
           
           return `
             <div class="room-selection-card ${isSelected ? 'selected' : ''}" data-cottage-id="${cottageId}" onclick="toggleCottageInManager('${cottageId}')">
               <div class="room-card-image">
-                <img src="${imageUrl}" alt="${cottageId}">
+                <img src="${cottageInfo.image}" alt="${cottageId}">
                 <div class="room-selection-indicator">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                     <path d="M20 6L9 17l-5-5"></path>
@@ -1282,7 +1593,7 @@ async function renderCottageItemsManagerGrid() {
               </div>
               <div class="room-card-content">
                 <h4>${cottageId}</h4>
-                <div class="room-price">${price}</div>
+                <div class="room-price">${cottageInfo.price}</div>
                 <button class="room-select-btn">${isSelected ? 'Selected' : 'Select'}</button>
               </div>
             </div>
@@ -1362,40 +1673,101 @@ window.toggleInlineCottage = function(cottageId) {
 
 // Calculate total booking cost
 function calculateTotalCost() {
+  console.log('[calculateTotalCost] Starting cost calculation');
+  console.log('[calculateTotalCost] Reservation type:', bookingFormState.reservationType);
+  
+  // Handle function hall bookings separately
+  if (bookingFormState.reservationType === 'function-hall') {
+    // Try multiple sources for hall name
+    let hallName = bookingFormState.preFillDates?.hallName || 
+                   window.selectedHallId || 
+                   '';
+    
+    // If still empty, try to get from form (as fallback)
+    if (!hallName) {
+      // Note: This is a fallback - normally hall name should be in preFillDates or selectedHallId
+      console.warn('[calculateTotalCost] Hall name not found in state, checking form...');
+    }
+    
+    console.log('[calculateTotalCost] Function hall - hallName:', hallName);
+    
+    // Function hall base prices
+    let baseCost = 0;
+    if (hallName.includes('Grand')) {
+      baseCost = FUNCTION_HALL_BASE_PRICE_GRAND;
+    } else if (hallName.includes('Intimate')) {
+      baseCost = FUNCTION_HALL_BASE_PRICE_INTIMATE;
+    } else {
+      console.warn('[calculateTotalCost] Unknown function hall name:', hallName);
+      // Default to Intimate Function Hall price if hall name is not recognized
+      baseCost = FUNCTION_HALL_BASE_PRICE_INTIMATE;
+    }
+    
+    // Calculate equipment costs (reuse same function as UI)
+    const equipment = calculateFunctionHallEquipmentCost();
+    const totalCost = baseCost + equipment.total;
+    
+    console.log('[calculateTotalCost] Function hall cost calculated:', { baseCost, equipmentTotal: equipment.total, totalCost });
+    
+    return {
+      functionHallCost: baseCost,
+      equipmentCost: equipment.total,
+      total: totalCost
+    };
+  }
+  
+  // Handle room and cottage bookings (existing logic)
   const checkin = bookingFormState.preFillDates?.checkin;
   const checkout = bookingFormState.preFillDates?.checkout;
   
-  if (!checkin || !checkout) return null;
+  if (!checkin || !checkout) {
+    console.log('[calculateTotalCost] No checkin/checkout dates, returning null');
+    return null;
+  }
   
   const nights = Math.ceil((new Date(checkout) - new Date(checkin)) / (1000 * 60 * 60 * 24));
+  console.log('[calculateTotalCost] Nights calculated:', nights);
   
   // Room costs
-  const roomCost = bookingFormState.selectedRoomsFromFlow?.length * 5500 * nights || 0;
+  const roomCost = bookingFormState.selectedRoomsFromFlow?.length * ROOM_PRICE * nights || 0;
+  console.log('[calculateTotalCost] Room cost:', roomCost);
   
   // Cottage costs
   let cottageCosts = 0;
+  let cottageDays = nights; // Default to room nights if no cottage dates specified
+  
   // Prefer selected list if present (room add-on flow or single-type cottage)
   if (Array.isArray(bookingState.selectedCottages) && bookingState.selectedCottages.length > 0) {
+    // Use cottageDates if available, otherwise fall back to nights
+    if (bookingFormState.cottageDates && bookingFormState.cottageDates.length > 0) {
+      cottageDays = bookingFormState.cottageDates.length;
+    }
+    
     cottageCosts = bookingState.selectedCottages.map(cottageId => {
       const cottageInfo = getCottageInfo(cottageId);
-      return parseInt(cottageInfo.price.replace(/[₱,/night]/g, ''));
-    }).reduce((sum, price) => sum + (price * nights), 0);
+      return parseInt(cottageInfo.price.replace(/[₱,]/g, ''));
+    }).reduce((sum, price) => sum + (price * cottageDays), 0);
   } else {
     // Cottage standalone flow single cottage (day-use). Cost preview handled separately.
     const typeEl = document.getElementById('cottage-type');
     const selectedType = typeEl?.value || '';
     if (selectedType) {
       const info = getCottageInfo(selectedType);
-      const priceNum = parseInt(info.price.replace(/[₱,/night]/g, '')) || 0;
+      const priceNum = parseInt(info.price.replace(/[₱,]/g, '')) || 0;
       cottageCosts = priceNum; // single cottage, day-use
     }
   }
+  console.log('[calculateTotalCost] Cottage cost:', cottageCosts);
+  
+  const total = roomCost + cottageCosts;
+  console.log('[calculateTotalCost] Total cost:', total);
   
   return {
     roomCost,
     cottageCost: cottageCosts,
     nights,
-    total: roomCost + cottageCosts
+    cottageDays,
+    total: total
   };
 }
 
@@ -1460,7 +1832,7 @@ async function getAvailableCottagesFromDatabase(checkin, checkout) {
   try {
     // For now, return all cottages (since we don't have booking data yet)
     // This will be filtered once bookings start being created
-    const allCottages = ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+    const allCottages = ['Standard Cottage', 'Open Cottage', 'Family Cottage'];
     
     // Check availability for each cottage
     const availableCottages = [];
@@ -1477,7 +1849,7 @@ async function getAvailableCottagesFromDatabase(checkin, checkout) {
   } catch (error) {
     console.error('Error getting available cottages:', error);
     // Fallback to showing all cottages
-    return ['Standard Cottage', 'Garden Cottage', 'Family Cottage'];
+    return ['Standard Cottage', 'Open Cottage', 'Family Cottage'];
   }
 }
 
@@ -1583,22 +1955,22 @@ function getCottageInfo(cottageId) {
   const cottageData = {
     'Standard Cottage': {
       image: 'images/cottage_1.JPG',
-      price: '₱9,500/night',
-      capacity: 6
+      price: '₱400',
+      capacity: COTTAGE_CAPACITY
     },
-    'Garden Cottage': {
+    'Open Cottage': {
       image: 'images/cottage_2.JPG',
-      price: '₱7,500/night',
-      capacity: 4
+      price: '₱300',
+      capacity: COTTAGE_CAPACITY
     },
     'Family Cottage': {
       image: 'images/kina1.jpg',
-      price: '₱10,200/night',
-      capacity: 7
+      price: '₱500',
+      capacity: COTTAGE_CAPACITY
     }
   };
   
-  return cottageData[cottageId] || { image: 'images/kina1.jpg', price: '₱9,500/night', capacity: 6 };
+  return cottageData[cottageId] || { image: 'images/kina1.jpg', price: `₱${COTTAGE_PRICE}`, capacity: COTTAGE_CAPACITY };
 }
 
 // Update bookingState.selectedCottages and UI price/capacity previews from form inputs
@@ -1629,7 +2001,7 @@ function updateCottageDerivedState() {
   const priceEl = document.getElementById('cottage-price-preview');
   if (priceEl && selectedType) {
     const info = getCottageInfo(selectedType);
-    const priceNum = parseInt(info.price.replace(/[₱,/night]/g, '')) || 0;
+    const priceNum = parseInt(info.price.replace(/[₱,]/g, '')) || 0;
     const total = priceNum;
     priceEl.textContent = `Estimated: ₱${total.toLocaleString()} (${selectedType})`;
   } else if (priceEl) {
@@ -2067,7 +2439,7 @@ async function populateInlineRoomsGrid() {
           </div>
           <div class="room-card-content">
             <h4>${roomId}</h4>
-            <div class="room-price">₱5,500/night</div>
+            <div class="room-price">₱${ROOM_PRICE.toLocaleString()}/night</div>
             <button type="button" class="room-select-btn" onclick="event.stopPropagation(); togglePendingRoom('${roomId}', event)">${isSelected ? 'Selected' : 'Select'}</button>
           </div>
         </div>
@@ -2445,10 +2817,24 @@ function initializeForm() {
     });
   }
   
-  // Real-time validation
+  // Real-time validation - validate during input, not just clear errors
   document.querySelectorAll('.form-input, .form-select').forEach(input => {
+    // Always validate on blur
     input.addEventListener('blur', () => validateField(input));
-    input.addEventListener('input', () => clearFieldError(input));
+    
+    // Validate during input with debouncing for contact number
+    input.addEventListener('input', () => {
+      if (input.name === 'contact') {
+        // Debounce contact validation (wait 300ms after typing stops)
+        clearTimeout(window.contactValidationTimeout);
+        window.contactValidationTimeout = setTimeout(() => {
+          validateField(input);
+        }, 300);
+      } else {
+        // Immediate validation for other fields
+        validateField(input);
+      }
+    });
   });
   
   // Update total guests display if coming from room selection flow
@@ -2456,8 +2842,26 @@ function initializeForm() {
     updateTotalGuests();
   }
   
-  // Load terms and conditions
-  loadTermsAndConditions();
+  // Load terms and conditions (only in new booking mode)
+  if (!bookingFormState.editMode) {
+    loadTermsAndConditions();
+    
+    // Add event listener to agreement checkbox to enable/disable submit button
+    const agreementCheckbox = document.getElementById('agreement');
+    if (agreementCheckbox) {
+      agreementCheckbox.addEventListener('change', () => {
+        updateSubmitButtonState();
+      });
+    }
+  }
+  
+  // Initialize submit button state (handles both edit and new booking modes)
+  updateSubmitButtonState();
+  
+  // Initialize function hall cost breakdown if applicable
+  if (bookingFormState.reservationType === 'function-hall') {
+    updateFunctionHallCost();
+  }
 
   // Cottage form dynamic handlers
   const cottageTypeEl = document.getElementById('cottage-type');
@@ -2481,10 +2885,10 @@ function initializeForm() {
         try {
           const { checkAvailability } = await import('../utils/api.js');
           const result = await checkAvailability(1, visit, visit, 'cottages');
-          let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+          let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Open Cottage','Family Cottage'];
           const selected = bookingState.selectedCottages || [];
           // For inline UI, show all three with selected state; disable ones not in available list
-          const all = ['Standard Cottage','Garden Cottage','Family Cottage'];
+          const all = ['Standard Cottage','Open Cottage','Family Cottage'];
           grid.innerHTML = all.map(c => {
             const isAvailable = available.includes(c);
             const isSelected = selected.includes(c);
@@ -2633,6 +3037,88 @@ async function loadTermsAndConditions() {
   termsInner.innerHTML = fallbackTerms;
 }
 
+// Reusable validation functions
+
+// Validate contact number - must be exactly CONTACT_NUMBER_LENGTH digits
+function validateContactNumber(value) {
+  if (!value || typeof value !== 'string') {
+    return { isValid: false, message: 'Contact number is required' };
+  }
+  const digitsOnly = value.replace(/\D/g, '');
+  if (digitsOnly.length !== CONTACT_NUMBER_LENGTH) {
+    return { 
+      isValid: false, 
+      message: `Contact number must be exactly ${CONTACT_NUMBER_LENGTH} digits` 
+    };
+  }
+  return { isValid: true, message: '' };
+}
+
+// Generic capacity validation function - reusable for both rooms and cottages
+function validateCapacity(adultsInput, childrenInput, capacity, capacityType, activeFieldId = null) {
+  if (!adultsInput || !childrenInput) {
+    return { isValid: true, message: '' };
+  }
+  
+  const adults = parseInt(adultsInput.value || '0') || 0;
+  const children = parseInt(childrenInput.value || '0') || 0;
+  const totalGuests = adults + children;
+  
+  // Get field IDs (showFieldError adds '-error' suffix)
+  const adultsId = adultsInput.id || adultsInput.name;
+  const childrenId = childrenInput.id || childrenInput.name;
+  
+  if (totalGuests > capacity) {
+    const errorMsg = `Total guests (${totalGuests}) exceeds ${capacityType} capacity of ${capacity}`;
+    
+    // Mark both fields with error class (visual indication)
+    adultsInput.classList.add('error');
+    childrenInput.classList.add('error');
+    
+    // Show error message on the active/focused field (the one currently being edited)
+    if (activeFieldId === adultsId || document.activeElement === adultsInput) {
+      // Show error on adults field (the one being edited)
+      showFieldError(adultsId, errorMsg);
+      clearFieldError(childrenId); // Clear from children to avoid duplication
+    } else if (activeFieldId === childrenId || document.activeElement === childrenInput) {
+      // Show error on children field (the one being edited)
+      showFieldError(childrenId, errorMsg);
+      clearFieldError(adultsId); // Clear from adults to avoid duplication
+    } else {
+      // Neither field is focused, show error on the field with higher value (most likely cause)
+      if (adults > children) {
+        showFieldError(adultsId, errorMsg);
+        clearFieldError(childrenId);
+      } else {
+        showFieldError(childrenId, errorMsg);
+        clearFieldError(adultsId);
+      }
+    }
+    
+    return { isValid: false, message: errorMsg };
+  } else {
+    // Clear errors from both fields
+    clearFieldError(adultsId);
+    clearFieldError(childrenId);
+    adultsInput.classList.remove('error');
+    childrenInput.classList.remove('error');
+    
+    return { isValid: true, message: '' };
+  }
+}
+
+// Validate room capacity - returns validation result and sets errors
+// activeFieldId: ID of the field currently being edited (prioritize error on this field)
+function validateSingleRoomCapacity(adultsInput, childrenInput, activeFieldId = null) {
+  return validateCapacity(adultsInput, childrenInput, ROOM_CAPACITY, 'room', activeFieldId);
+}
+
+// Validate cottage capacity - returns validation result and sets errors
+// activeFieldId: ID of the field currently being edited (prioritize error on this field)
+function validateSingleCottageCapacity(adultsInput, childrenInput, activeFieldId = null) {
+  return validateCapacity(adultsInput, childrenInput, COTTAGE_CAPACITY, 'cottage', activeFieldId);
+}
+
 // Validate individual field
 function validateField(field) {
   const value = field.value.trim();
@@ -2678,12 +3164,12 @@ function validateField(field) {
     }
   }
   
-  // Phone validation
-  if (fieldName === 'contact' && value) {
-    const phoneRegex = /^[\+]?[0-9\s\-\(\)]{10,}$/;
-    if (!phoneRegex.test(value)) {
+  // Phone validation - use reusable function
+  if (fieldName === 'contact') {
+    const contactValidation = validateContactNumber(value);
+    if (!contactValidation.isValid) {
       isValid = false;
-      errorMessage = 'Please enter a valid phone number';
+      errorMessage = contactValidation.message;
     }
   }
   
@@ -2804,29 +3290,61 @@ function validateForm() {
   
   // Validate checkboxes/radio buttons
   if (bookingFormState.reservationType === 'room') {
-    // If rooms selected from flow, skip checkbox validation
+    // If rooms selected from flow, validate per-room guest counts against capacity
     if (bookingFormState.selectedRoomsFromFlow?.length > 0) {
       console.log('Rooms pre-selected from flow:', bookingFormState.selectedRoomsFromFlow);
+      
+      // Validate each room's guest count using reusable function
+      bookingFormState.selectedRoomsFromFlow.forEach(roomId => {
+        const adultsInput = document.getElementById(`${roomId}-adults`);
+        const childrenInput = document.getElementById(`${roomId}-children`);
+        
+        if (adultsInput && childrenInput) {
+          const result = validateSingleRoomCapacity(adultsInput, childrenInput, roomId);
+          if (!result.isValid) {
+            isValid = false;
+          }
+        }
+      });
+      
+      // Also check the default adults/children inputs if no per-room inputs (edge case)
+      if (bookingFormState.selectedRoomsFromFlow.length === 0) {
+        const adultsInput = document.getElementById('adults');
+        const childrenInput = document.getElementById('children');
+        if (adultsInput && childrenInput) {
+          const result = validateSingleRoomCapacity(adultsInput, childrenInput);
+          if (!result.isValid) {
+            isValid = false;
+          }
+        }
+      }
     } else {
-    const selectedRooms = document.querySelectorAll('input[name="selectedRooms"]:checked');
-    const numRooms = parseInt(document.getElementById('num-rooms')?.value || '1');
+      const selectedRooms = document.querySelectorAll('input[name="selectedRooms"]:checked');
+      const numRooms = parseInt(document.getElementById('num-rooms')?.value || '1');
       
       console.log(`Room validation: ${selectedRooms.length} selected, ${numRooms} expected`);
     
-    if (selectedRooms.length !== numRooms) {
-      isValid = false;
+      if (selectedRooms.length !== numRooms) {
+        isValid = false;
         const numRoomsField = document.getElementById('num-rooms');
         if (numRoomsField) {
           showFieldError('num-rooms', `Please select exactly ${numRooms} room${numRooms > 1 ? 's' : ''}`);
+        }
+      }
+      
+      // Validate default room guest count using reusable function
+      const adultsInput = document.getElementById('adults');
+      const childrenInput = document.getElementById('children');
+      if (adultsInput && childrenInput) {
+        const result = validateSingleRoomCapacity(adultsInput, childrenInput);
+        if (!result.isValid) {
+          isValid = false;
         }
       }
     }
   }
   
   if (bookingFormState.reservationType === 'cottage') {
-    const adultsEl = document.getElementById('cottage-adults');
-    const childrenEl = document.getElementById('cottage-children');
-    
     // Require at least one cottage selected via items manager
     const selectedCottages = bookingState.selectedCottages || [];
     if (!selectedCottages.length) {
@@ -2834,19 +3352,19 @@ function validateForm() {
       showFieldError('cottage-date', 'Select a cottage type via Add/Remove Items');
     }
     
-    // Capacity constraint
-    if (selectedCottages.length) {
-      // Single cottage per type; take first selected for capacity
-      const cap = getCottageInfo(selectedCottages[0]).capacity || 0;
-      const totalGuests = (parseInt(adultsEl?.value || '0') || 0) + (parseInt(childrenEl?.value || '0') || 0);
-      const maxGuests = cap;
+    // Validate cottage capacity using reusable function
+    const adultsEl = document.getElementById('cottage-adults');
+    const childrenEl = document.getElementById('cottage-children');
+    if (adultsEl && childrenEl) {
+      const totalGuests = (parseInt(adultsEl.value || '0') || 0) + (parseInt(childrenEl.value || '0') || 0);
       if (totalGuests < 1) {
         isValid = false;
         showFieldError('cottage-adults', 'At least one guest is required');
-      }
-      if (totalGuests > maxGuests) {
-        isValid = false;
-        showFieldError('cottage-children', `Exceeds capacity. Max ${maxGuests} guests for selected cottage`);
+      } else {
+        const result = validateSingleCottageCapacity(adultsEl, childrenEl);
+        if (!result.isValid) {
+          isValid = false;
+        }
       }
     }
   }
@@ -2901,6 +3419,12 @@ function validateForm() {
     if (!eventGuests?.value || parseInt(eventGuests.value) < 1) {
       isValid = false;
       showFieldError('event-guests', 'Number of guests must be at least 1');
+    } else {
+      const result = validateFunctionHallGuests();
+      // Only block submission if exceeds maximum (150), warnings are acceptable
+      if (!result.isValid) {
+        isValid = false;
+      }
     }
     
     // Validate hall selection (should be set from flow)
@@ -2910,11 +3434,13 @@ function validateForm() {
     }
   }
   
-  // Validate agreement checkbox
-  const agreement = document.getElementById('agreement');
-  if (!agreement?.checked) {
-    isValid = false;
-    showFieldError('agreement', 'You must agree to the booking policy');
+  // Validate agreement checkbox (skip in edit mode - already agreed during initial booking)
+  if (!bookingFormState.editMode) {
+    const agreement = document.getElementById('agreement');
+    if (!agreement?.checked) {
+      isValid = false;
+      showFieldError('agreement', 'You must agree to the booking policy');
+    }
   }
   
   return isValid;
@@ -2926,9 +3452,15 @@ async function saveBooking(bookingData) {
   
   try {
     // Calculate total cost
+    console.log('[saveBooking] Starting cost calculation for booking type:', bookingFormState.reservationType);
     const costs = calculateTotalCost();
     const totalCost = costs ? costs.total : 0;
-    console.log('[Booking] Calculated total cost:', totalCost);
+    console.log('[saveBooking] Cost calculation result:', costs);
+    console.log('[saveBooking] Total cost extracted:', totalCost);
+    
+    if (totalCost === 0 && bookingFormState.reservationType === 'function-hall') {
+      console.warn('[saveBooking] ⚠️ Function hall booking has zero cost! Check hall selection and calculation.');
+    }
 
     // Map reservationType to category for backend storage
     const categoryMap = {
@@ -2938,9 +3470,14 @@ async function saveBooking(bookingData) {
     };
     const category = categoryMap[bookingFormState.reservationType] || 'rooms';
     
+    // Get correct package ID based on category
+    const { getPackageIdByCategory } = await import('../utils/packageMapping.js');
+    const packageId = getPackageIdByCategory(category);
+    console.log('[Booking] Determined packageId:', { category, packageId, reservationType: bookingFormState.reservationType });
+    
     // Prepare booking payload
     const bookingPayload = {
-      packageId: 1, // Standard Room package ID
+      packageId: packageId,
       checkIn: bookingData.dates.checkin || bookingData.dates.eventDate || bookingData.dates.date,
       checkOut: bookingData.dates.checkout || bookingData.dates.eventDate || bookingData.dates.date,
       guests: bookingData.guests, // Send the full guests object with adults/children
@@ -3054,8 +3591,13 @@ async function updateExistingBooking(bookingId, bookingData) {
     };
     const category = categoryMap[bookingFormState.reservationType] || 'rooms';
     
+    // Get correct package ID based on category
+    const { getPackageIdByCategory } = await import('../utils/packageMapping.js');
+    const packageId = getPackageIdByCategory(category);
+    console.log('[Booking] Determined packageId for update:', { category, packageId, reservationType: bookingFormState.reservationType });
+    
     const bookingPayload = {
-      packageId: 1,
+      packageId: packageId,
       checkIn: bookingData.dates.checkin || bookingData.dates.eventDate || bookingData.dates.date,
       checkOut: bookingData.dates.checkout || bookingData.dates.eventDate || bookingData.dates.date,
       guests: bookingData.guests,
@@ -3532,6 +4074,12 @@ window.submitBooking = async function(event) {
 
 // Show booking success
 function showBookingSuccess(bookingData, savedBooking) {
+  console.log('[showBookingSuccess] Starting success modal display');
+  console.log('[showBookingSuccess] Booking data:', JSON.stringify(bookingData, null, 2));
+  console.log('[showBookingSuccess] Saved booking:', JSON.stringify(savedBooking, null, 2));
+  console.log('[showBookingSuccess] Reservation type:', bookingData.reservationType);
+  console.log('[showBookingSuccess] Guests data:', bookingData.guests);
+  
   const packageName = bookingData.reservationType === 'room' ? 'Standard Room' : 
                       bookingData.reservationType === 'cottage' ? 'Cottage' : 'Function Hall';
   
@@ -3647,13 +4195,20 @@ function showBookingSuccess(bookingData, savedBooking) {
                 <strong>${bookingData.dates.nights}</strong>
               </div>
             ` : ''}
-            <div class="summary-item">
-              <span>Total Guests:</span>
-              <strong>${bookingData.guests.adults} Adults, ${bookingData.guests.children} Children</strong>
-            </div>
+            ${bookingData.reservationType === 'function-hall' ? `
+              <div class="summary-item">
+                <span>Total Guests:</span>
+                <strong>${bookingData.guests?.total || 'N/A'} Guests</strong>
+              </div>
+            ` : `
+              <div class="summary-item">
+                <span>Total Guests:</span>
+                <strong>${bookingData.guests?.adults || 0} Adults, ${bookingData.guests?.children || 0} Children</strong>
+              </div>
+            `}
             <div class="summary-item">
               <span>Total Cost:</span>
-              <strong>₱${savedBooking.total_cost?.toLocaleString() || 'N/A'}</strong>
+              <strong>₱${(savedBooking.total_cost || 0).toLocaleString()}</strong>
             </div>
             <div class="summary-item">
               <span>Payment:</span>
@@ -3853,7 +4408,7 @@ window.openCottageSelectionModal = async function() {
     const html = generateCottageSelectionView(await (async () => {
       const { checkAvailability } = await import('../utils/api.js');
       const result = await checkAvailability(1, visit, visit, 'cottages');
-      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Garden Cottage','Family Cottage'];
+      let available = (result?.dateAvailability?.[visit]?.availableCottages) || ['Standard Cottage','Open Cottage','Family Cottage'];
       // Filter out already-selected to avoid duplicates in selection modal
       const selected = bookingState.selectedCottages || [];
       available = available.filter(c => !selected.includes(c));
