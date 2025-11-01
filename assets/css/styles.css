@@ -282,10 +282,14 @@ html.lenis {
   background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
   color: rgba(255, 255, 255, 0.9);
   border-top: none;
+  width: 100%;
+  overflow: visible;
 }
 
 #site-footer .container {
   max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 20px;
 }
 
 #site-footer h3 {
@@ -323,6 +327,87 @@ html.lenis {
   grid-template-columns: 2fr 1fr 1fr 1.5fr;
   gap: 40px;
   margin-bottom: 40px;
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+}
+
+@media (max-width: 768px) {
+  #site-footer {
+    padding: 40px 0 20px;
+    margin-top: 40px;
+  }
+  
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+    margin-bottom: 32px;
+  }
+  
+  .footer-about {
+    max-width: none;
+  }
+  
+  .footer-logo {
+    font-size: 24px;
+    margin-bottom: 12px;
+  }
+  
+  .footer-desc {
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  
+  .footer-links h4 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+  
+  .footer-contact h4 {
+    font-size: 16px;
+    margin-bottom: 16px;
+  }
+  
+  .contact-info-item {
+    margin-bottom: 12px;
+  }
+  
+  .contact-info-item:last-child {
+    margin-bottom: 0;
+  }
+  
+  .footer-bottom {
+    padding-top: 20px;
+    margin-top: 20px;
+  }
+  
+  .footer-bottom p {
+    font-size: 12px;
+    line-height: 1.6;
+    word-wrap: break-word;
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  #site-footer {
+    padding: 30px 0 16px;
+  }
+  
+  .footer-grid {
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  
+  .footer-bottom p {
+    font-size: 11px;
+    padding: 0 10px;
+  }
 }
 
 .footer-about {
@@ -663,7 +748,7 @@ a.btn {
   display: grid;
   grid-template-columns: 1fr;
   gap: 16px;
-  margin-top: 0;
+  margin-top: clamp(120px, calc(5vw + 100px), 160px);
   background: transparent;
   border: none;
   border-radius: 0;
@@ -672,47 +757,150 @@ a.btn {
 .weather .current {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px;
-  background: var(--color-bg);
-  border-radius: 12px;
-  margin-bottom: 16px;
+  gap: 20px;
+  padding: 24px;
+  background: linear-gradient(135deg, #fffbf0 0%, #fff9e6 50%, #ffffff 100%);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 16px rgba(255, 215, 0, 0.15);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.weather .current:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(255, 215, 0, 0.25);
 }
 .weather .current .temp {
-  font-size: 48px;
-  font-weight: 700;
-  color: #38b6ff;
+  font-size: 56px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+  letter-spacing: -2px;
 }
 .weather .current .cond {
   color: var(--color-muted);
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.weather-condition-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-left: 4px;
+}
+.weather-icon-large {
+  font-size: 32px;
+  line-height: 1;
 }
 .weather .future {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 12px;
   align-items: stretch;
   margin-bottom: 16px;
 }
 .chip {
   min-width: 0;
   width: 100%;
-  background: #f2f7f7;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 8px;
+  background: #ffffff;
+  border: 1px solid rgba(56, 182, 255, 0.15);
+  border-radius: 14px;
+  padding: 16px 12px;
   text-align: center;
   display: grid;
   place-items: center;
-  transition: transform 0.2s ease, box-shadow 0.2s ease,
-    background-color 0.2s ease;
+  transition: all 0.3s ease;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
-
+.chip::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #38b6ff 0%, #1e88e5 100%);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+.chip:hover::before {
+  transform: scaleX(1);
+}
 .chip:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  background-color: #ffffff;
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(56, 182, 255, 0.2);
+  background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+  border-color: rgba(56, 182, 255, 0.3);
+}
+/* Weather chip specific styles */
+.weather-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chip-day,
+.weather-chip .day {
+  font-weight: 700;
+  color: var(--color-text);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.chip-date,
+.weather-chip .date {
+  font-size: 10px;
+  color: var(--color-muted);
+  margin-bottom: 4px;
+}
+.chip-weather-icon,
+.weather-chip .weather-icon-large {
+  font-size: 36px;
+  line-height: 1;
+  margin: 4px 0;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+}
+.chip-condition,
+.weather-chip .condition-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #38b6ff;
+  background: rgba(56, 182, 255, 0.1);
+  padding: 4px 8px;
+  border-radius: 8px;
+  text-transform: capitalize;
+  margin: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.chip-temp,
+.weather-chip .temp-range {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 4px 0;
+}
+.chip-temp-min,
+.weather-chip .temp-min {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-muted);
+  opacity: 0.8;
+}
+.chip-humidity,
+.weather-chip .humidity-forecast {
+  font-size: 10px;
+  color: var(--color-muted);
+  margin-top: 2px;
 }
 
 /* Sections */
@@ -2292,11 +2480,7 @@ label {
 
 /* Footer stacks on mobile */
 @media (max-width: 680px) {
-  #site-footer .container > div {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 12px !important;
-  }
+  /* Footer specific styles for small screens */
 }
 
 /* Extra small screens */
@@ -3446,16 +3630,6 @@ html.lenis {
   
   #section-weather-video {
     padding: clamp(30px, 5vw, 50px) 0;
-  }
-  
-  /* Footer Responsive */
-  .footer-grid {
-    grid-template-columns: 1fr;
-    gap: 32px;
-  }
-  
-  .footer-about {
-    max-width: none;
   }
 }
 
@@ -5374,7 +5548,6 @@ input[type="date"][readonly]:hover {
 
 .booking-form-content {
   padding: 40px;
-  overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
@@ -5734,8 +5907,6 @@ input[type="date"][readonly]:hover {
 }
 
 .terms-content {
-  max-height: 400px;
-  overflow-y: auto;
   transition: max-height 0.3s ease;
 }
 

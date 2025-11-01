@@ -9,7 +9,7 @@ export async function AboutPage() {
     <section class="about-content">
       <div class="container">
         <h2>Our Story</h2>
-        <p>Nestled along the pristine shores of the Island Province, Kina Resort has been welcoming guests to experience the perfect blend of tropical serenity and modern comfort since our founding. We believe that every guest deserves an authentic island experience that rejuvenates the soul while providing all the conveniences of contemporary living.</p>
+        <p>Nestled in the scenic town of Rodriguez, Rizal, Kina Resort has been welcoming guests to experience the perfect blend of tropical serenity and modern comfort since our founding. Located at M.H Del Pilar Street, San Rafael, Rodriguez, Rizal, we believe that every guest deserves an authentic experience that rejuvenates the soul while providing all the conveniences of contemporary living.</p>
       </div>
     </section>
 
@@ -71,6 +71,7 @@ export async function AboutPage() {
         background: white;
         padding-block: 0 !important;
         margin: 0;
+        margin-top: 100px;
       }
 
       .about-hero .container {

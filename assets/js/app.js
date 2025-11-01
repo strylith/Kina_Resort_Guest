@@ -14,6 +14,8 @@ import { WeatherPage } from './pages/weather.js';
 import { CheckoutPage } from './pages/checkout.js';
 import { AboutPage } from './pages/about.js';
 import { TermsPage } from './pages/terms.js';
+import { PrivacyPage } from './pages/privacy.js';
+import { RefundPage } from './pages/refund.js';
 import { getAuthState } from './utils/state.js';
 import { initSmoothScroll, destroySmoothScroll, scrollToTop } from './utils/smoothScroll.js';
 import { initHomepageScrollAnimations, cleanupScrollAnimations } from './utils/scrollAnimation.js';
@@ -35,7 +37,9 @@ const routes = {
   '/weather': WeatherPage,
   '/checkout': CheckoutPage,
   '/about': AboutPage,
-  '/terms': TermsPage
+  '/terms': TermsPage,
+  '/privacy': PrivacyPage,
+  '/refund': RefundPage
 };
 
 function updateAdminVisibility(){

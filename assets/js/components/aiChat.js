@@ -2,6 +2,7 @@
 // This file handles the AI chat popup and API integration
 
 import { AI_CONFIG, isAPIConfigured, getMockResponse } from '../config/aiConfig.js';
+import { fetchWeatherSummary } from '../utils/api.js';
 
 // =============================================================================
 // AI CHAT STATE MANAGEMENT
@@ -590,6 +591,107 @@ async function getAIResponse(userMessage) {
     return getMockResponse(userMessage);
   }
   
+  // Fetch current weather and forecast data for AI context
+  let weatherContext = '';
+  try {
+    const weatherData = await fetchWeatherSummary();
+    if (weatherData && weatherData.nextDays) {
+      // Philippines timezone: UTC+8
+      const PH_TIMEZONE_OFFSET = 8;
+      
+      // Get current date in Philippines timezone (UTC+8)
+      const now = new Date();
+      const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const phTime = new Date(utcTime + (PH_TIMEZONE_OFFSET * 3600000));
+      
+      const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      
+      // Format current date in Philippines timezone
+      const currentDate = `${weekdays[phTime.getDay()]}, ${months[phTime.getMonth()]} ${phTime.getDate()}, ${phTime.getFullYear()}`;
+      
+      // Format forecast dates - use actual dates from forecast data
+      // The server provides fullDate in UTC (YYYY-MM-DD format), convert to Philippines timezone
+      const forecastDates = weatherData.nextDays.map((day, index) => {
+        let forecastDate;
+        
+        // Use fullDate if available (UTC format), convert to Philippines timezone
+        if (day.fullDate) {
+          const [year, month, dayNum] = day.fullDate.split('-').map(Number);
+          // Create UTC date at midnight
+          const utcDate = new Date(Date.UTC(year, month - 1, dayNum));
+          // Convert to Philippines timezone (UTC+8)
+          const phDate = new Date(utcDate.getTime() + (PH_TIMEZONE_OFFSET * 3600000));
+          forecastDate = phDate;
+        } else {
+          // Fallback: calculate from Philippines today + index
+          forecastDate = new Date(phTime);
+          forecastDate.setDate(phTime.getDate() + index);
+          forecastDate.setHours(0, 0, 0, 0);
+        }
+        
+        // Get date components in Philippines timezone
+        const dayName = weekdays[forecastDate.getDay()];
+        const monthName = months[forecastDate.getMonth()];
+        const dayNum = forecastDate.getDate();
+        const year = forecastDate.getFullYear();
+        
+        let dateLabel;
+        if (index === 0) {
+          dateLabel = `Today, ${monthName} ${dayNum}, ${year}`;
+        } else if (index === 1) {
+          dateLabel = `Tomorrow, ${monthName} ${dayNum}, ${year}`;
+        } else {
+          dateLabel = `${dayName}, ${monthName} ${dayNum}, ${year}`;
+        }
+        
+        // Get accurate weather data - use exact fields from API response
+        const condition = day.condition || 'Clear';
+        const temp = day.t || 28;
+        const tempMin = day.tMin !== null && day.tMin !== undefined ? day.tMin : null;
+        const icon = day.icon || '☀️';
+        const humidity = day.humidity !== null && day.humidity !== undefined ? day.humidity : null;
+        
+        return {
+          date: dateLabel,
+          day: dayName,
+          condition: condition,
+          temp: temp,
+          tempMin: tempMin,
+          icon: icon,
+          humidity: humidity,
+          fullDate: day.fullDate || null // Keep original fullDate for reference
+        };
+      });
+      
+      const forecastText = forecastDates.map(f => {
+        let line = `- ${f.date}: ${f.condition}, ${f.temp}°C`;
+        if (f.tempMin !== null && f.tempMin !== undefined) {
+          line += ` (low: ${f.tempMin}°C)`;
+        }
+        if (f.humidity !== null && f.humidity !== undefined) {
+          line += `, humidity ${f.humidity}%`;
+        }
+        line += ` ${f.icon}`;
+        return line;
+      }).join('\n');
+      
+      // Log weather context for debugging (only if DEBUG_AI is enabled)
+      if (localStorage.getItem('DEBUG_AI') === 'true') {
+        console.log('🌤️ Weather context for AI:', {
+          currentDate,
+          forecastCount: forecastDates.length,
+          forecastDates: forecastDates.map(f => ({ date: f.date, condition: f.condition, temp: f.temp }))
+        });
+      }
+      
+      weatherContext = `\n\nCURRENT DATE AND WEATHER FORECAST (USE THIS DATA - DO NOT CALCULATE DATES YOURSELF):\nCurrent Date (Philippines Timezone, UTC+8): ${currentDate}\n\n5-Day Weather Forecast (Philippines Timezone, UTC+8):\n${forecastText}\n\nIMPORTANT: All dates above are in Philippines timezone (UTC+8). When recommending dates, use ONLY the dates provided above. Do not calculate dates yourself. Do not use past dates. Use the exact dates from the forecast data. These are the ONLY dates available for recommendation.`;
+    }
+  } catch (error) {
+    console.error('Error fetching weather data for AI:', error);
+    // Continue without weather context if fetch fails
+  }
+  
   // Limit history BEFORE adding new message to maintain consistent token usage
   const maxHistoryLength = AI_CONFIG.MAX_HISTORY * 2; // MAX_HISTORY pairs (user + assistant)
   if (apiHistory.length >= maxHistoryLength) {
@@ -609,9 +711,10 @@ async function getAIResponse(userMessage) {
     console.log('Sending request to OpenRouter API...');
     
     // Construct messages array - always include system prompt for context
-    // For first message, only system prompt + user message (minimal tokens)
+    // Include weather context in system prompt
+    const systemPrompt = AI_CONFIG.SYSTEM_PROMPT + weatherContext;
     const messages = [
-      { role: 'system', content: AI_CONFIG.SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       ...apiHistory
     ];
     

@@ -47,8 +47,8 @@ export function renderFooter(){
           <h4>Legal</h4>
           <ul>
             <li><a href="#/terms">→ Terms & Conditions</a></li>
-            <li><a href="#/legal/privacy">→ Privacy Policy</a></li>
-            <li><a href="#/legal/refund">→ Refund Policy</a></li>
+            <li><a href="#/privacy">→ Privacy Policy</a></li>
+            <li><a href="#/refund">→ Refund Policy</a></li>
           </ul>
         </div>
 
@@ -64,7 +64,7 @@ export function renderFooter(){
             </div>
             <div class="contact-text">
               <strong>Address</strong>
-              <span>Barangay Coastline<br>Island Province, Philippines</span>
+              <span>M.H Del Pilar Street<br>San Rafael, Rodriguez, Rizal<br>Philippines</span>
             </div>
           </div>
           <div class="contact-info-item">

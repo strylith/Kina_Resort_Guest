@@ -26,5 +26,7 @@ export const FEATURE_FLAGS = {
   weather: false
 };
 
+// Weather is now template-based (see weatherTemplate.js)
+
 
 

@@ -8,6 +8,7 @@ import packagesRoutes from './routes/packages.js';
 import bookingsRoutes from './routes/bookings.js';
 import usersRoutes from './routes/users.js';
 import settingsRoutes from './routes/settings.js';
+import weatherRoutes from './routes/weather.js';
 
 dotenv.config();
 
@@ -71,7 +72,8 @@ app.get('/', (req, res) => {
       packages: '/api/packages',
       bookings: '/api/bookings',
       users: '/api/users',
-      settings: '/api/settings'
+      settings: '/api/settings',
+      weather: '/api/weather'
     },
     timestamp: new Date().toISOString()
   });
@@ -92,6 +94,7 @@ app.use('/api/packages', packagesRoutes);
 app.use('/api/bookings', bookingsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/weather', weatherRoutes);
 
 // API root health/index endpoint
 app.get('/api', (req, res) => {
@@ -263,6 +266,18 @@ async function startServer() {
       console.log(`📚 API endpoint: http://localhost:${PORT}/api`);
       if (process.env.USE_MOCK_DB === 'true') {
         console.log(`🧪 Mock API endpoint: http://localhost:${PORT}/mock`);
+      }
+    }).on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\n❌ Port ${PORT} is already in use!`);
+        console.error('💡 To fix this, run one of the following:');
+        console.error(`   lsof -ti :${PORT} | xargs kill -9`);
+        console.error('   pkill -f "node server.js"');
+        console.error('   Or use: ./restart-server.sh\n');
+        process.exit(1);
+      } else {
+        console.error('❌ Server error:', err);
+        process.exit(1);
       }
     });
   } catch (error) {

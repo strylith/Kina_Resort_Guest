@@ -70,24 +70,67 @@ export async function request(path, options = {}) {
   return apiRequest(path, options);
 }
 
-// Weather API (keeping mock for now)
+// Weather Template - Simple template-based weather system
 export async function fetchWeatherSummary() {
-  await new Promise(res => setTimeout(res, 300));
+  try {
+    // Fetch with cache-busting to ensure fresh data when date changes
+    // Add timestamp query parameter to prevent browser/proxy caching
+    const timestamp = new Date().getTime();
+    const data = await apiRequest(`/weather/summary?t=${timestamp}`);
+    
+    // Return the data in the format expected by the frontend
+    return data.data || data;
+  } catch (error) {
+    console.error('Weather template error:', error);
+    
+    // Generate fallback forecast with 7 days
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const fallbackForecast = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      const dayOfWeek = weekdays[date.getDay()];
+      const month = monthNames[date.getMonth()];
+      const dayNum = date.getDate();
+      
+      let dateLabel;
+      if (i === 0) {
+        dateLabel = 'Today';
+      } else if (i === 1) {
+        dateLabel = 'Tomorrow';
+      } else {
+        dateLabel = `${month} ${dayNum}`;
+      }
+      
+      fallbackForecast.push({
+        d: dayOfWeek,
+        date: dateLabel,
+        fullDate: date.toISOString().split('T')[0],
+        t: 28,
+        c: 'Clear',
+        icon: '☀️'
+      });
+    }
+    
+    // Fallback to basic template if server error
     return {
-      location: 'Kina Resort',
-      current: { tempC: 31, condition: 'Sunny', icon: '☀️' },
-      nextDays: [
-        { d: 'Mon', t: 30, c: 'Sunny' },
-        { d: 'Tue', t: 29, c: 'Cloudy' },
-        { d: 'Wed', t: 31, c: 'Sunny' },
-        { d: 'Thu', t: 31, c: 'Sunny' },
-        { d: 'Fri', t: 29, c: 'Partly Cloudy' },
-        { d: 'Sat', t: 30, c: 'Sunny' },
-        { d: 'Sun', t: 28, c: 'Showers' },
-      ],
-      suggestion: 'Best time to visit: sunny Fri–Mon afternoons.'
+      location: 'Caloocan, Philippines',
+      current: { 
+        tempC: 28, 
+        condition: 'Sunny', 
+        icon: '☀️',
+        feelslike: 30,
+        humidity: 65
+      },
+      nextDays: fallbackForecast,
+      suggestion: 'Perfect weather for outdoor activities!'
     };
   }
+}
 
 // Authentication API
 export async function login(email, password) {

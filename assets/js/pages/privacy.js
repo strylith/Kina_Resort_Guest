@@ -1,6 +1,6 @@
-// assets/js/pages/terms.js
-export function TermsPage() {
-  // Scroll to top when Terms page loads
+// assets/js/pages/privacy.js
+export function PrivacyPage() {
+  // Scroll to top when Privacy page loads
   setTimeout(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, 100);
@@ -8,8 +8,8 @@ export function TermsPage() {
   return `
     <section class="terms-hero">
       <div class="container">
-        <h1>Terms & Conditions</h1>
-        <p class="terms-subtitle">Please read these terms carefully before booking your stay at Kina Resort</p>
+        <h1>Privacy Policy</h1>
+        <p class="terms-subtitle">Your privacy is important to us. This policy explains how we collect, use, and protect your personal information.</p>
       </div>
     </section>
 
@@ -23,108 +23,108 @@ export function TermsPage() {
 
     <section class="terms-content">
       <div class="container">
-        <h2>1. Resort Booking Agreement</h2>
-        <p>By making a reservation at Kina Resort, you accept and agree to be bound by these terms and conditions. These terms govern your stay at our tropical paradise resort located at M.H Del Pilar Street, San Rafael, Rodriguez, Rizal, Philippines.</p>
+        <h2>1. Introduction</h2>
+        <p>At Kina Resort, we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website, make a reservation, or use our services.</p>
       </div>
     </section>
 
     <section class="terms-content">
       <div class="container">
-        <h2>2. Resort Services and Amenities</h2>
-        <p>Kina Resort offers luxury accommodations, dining services, recreational activities, and resort amenities. All services are subject to availability and seasonal variations. We reserve the right to modify or discontinue services with reasonable notice.</p>
-        
-        <h3>2.1 Accommodation Services</h3>
-        <p>Our resort features luxury cottages, ocean-view rooms, and premium suites. All accommodations include daily housekeeping, resort amenities, and access to resort facilities.</p>
-        
-        <h3>2.2 Dining and Culinary Services</h3>
-        <p>We offer fine dining experiences, beachside dining, and room service. Special dietary requirements can be accommodated with advance notice.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>3. Reservations and Payment</h2>
-        <h3>3.1 Booking Process</h3>
-        <p>All reservations are subject to availability and confirmation. A valid credit card is required to secure your booking. We reserve the right to refuse service to anyone for any reason at any time.</p>
-        
-        <h3>3.2 Payment Terms</h3>
-        <p>Full payment is required at the time of booking. We accept major credit cards, bank transfers, and other approved payment methods. All prices are in Philippine Peso (PHP) and include applicable taxes.</p>
-        
-        <h3>3.3 Cancellation and Refund Policy</h3>
-        <p>Cancellations made 7 days or more before arrival: Full refund. Cancellations made 3-6 days before arrival: 50% refund. Cancellations made less than 3 days before arrival: No refund. No-shows will be charged the full amount.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>4. Guest Responsibilities and Resort Policies</h2>
-        <p>Guests are responsible for:</p>
+        <h2>2. Information We Collect</h2>
+        <p>We collect information that you provide directly to us when you:</p>
         <ul>
-          <li>Providing accurate information during booking and check-in</li>
-          <li>Following resort policies, safety guidelines, and local regulations</li>
-          <li>Respecting other guests, staff, and resort property</li>
-          <li>Reporting any damages, safety concerns, or issues immediately</li>
-          <li>Maintaining appropriate behavior throughout their stay</li>
-          <li>Complying with dress codes in dining areas and common spaces</li>
+          <li>Make a reservation or booking</li>
+          <li>Create an account on our website</li>
+          <li>Contact us for customer support</li>
+          <li>Subscribe to our newsletter or promotional communications</li>
+          <li>Participate in surveys or special offers</li>
+        </ul>
+        <h3>2.1 Personal Information</h3>
+        <p>This may include your name, email address, phone number, mailing address, payment information, identification documents, and any other information you choose to provide.</p>
+        <h3>2.2 Automatically Collected Information</h3>
+        <p>When you visit our website, we automatically collect certain information about your device, including your IP address, browser type, operating system, and browsing behavior through cookies and similar tracking technologies.</p>
+      </div>
+    </section>
+
+    <section class="terms-content">
+      <div class="container">
+        <h2>3. How We Use Your Information</h2>
+        <p>We use the information we collect to:</p>
+        <ul>
+          <li>Process and manage your reservations and bookings</li>
+          <li>Communicate with you about your reservations, requests, and inquiries</li>
+          <li>Send you marketing communications, promotional offers, and newsletters (with your consent)</li>
+          <li>Improve our services, website functionality, and user experience</li>
+          <li>Comply with legal obligations and resolve disputes</li>
+          <li>Ensure the security and safety of our resort and guests</li>
+          <li>Conduct analytics and research to better understand our guests' preferences</li>
         </ul>
       </div>
     </section>
 
     <section class="terms-content">
       <div class="container">
-        <h2>5. Resort Safety and Security</h2>
-        <p>Guest safety is our priority. We maintain 24/7 security services and emergency procedures. Guests must follow all safety instructions, especially during water activities and resort excursions. Children must be supervised at all times.</p>
+        <h2>4. Information Sharing and Disclosure</h2>
+        <p>We do not sell or rent your personal information to third parties. We may share your information only in the following circumstances:</p>
+        <h3>4.1 Service Providers</h3>
+        <p>We may share your information with trusted third-party service providers who assist us in operating our website, processing payments, managing reservations, and providing guest services.</p>
+        <h3>4.2 Legal Requirements</h3>
+        <p>We may disclose your information if required by law, court order, or governmental regulation, or to protect the rights, property, or safety of Kina Resort, our guests, or others.</p>
+        <h3>4.3 Business Transfers</h3>
+        <p>In the event of a merger, acquisition, or sale of assets, your information may be transferred as part of the transaction.</p>
       </div>
     </section>
 
     <section class="terms-content">
       <div class="container">
-        <h2>6. Privacy and Data Protection</h2>
-        <p>We collect and process your personal information in accordance with Philippine data protection laws. Your information is used for reservation management, service delivery, and communication purposes. We do not share your information with third parties without consent.</p>
+        <h2>5. Data Security</h2>
+        <p>We implement appropriate technical and organizational security measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction. However, no method of transmission over the Internet or electronic storage is 100% secure.</p>
       </div>
     </section>
 
     <section class="terms-content">
       <div class="container">
-        <h2>7. Resort Liability and Limitations</h2>
-        <p>Kina Resort is not liable for personal injuries, lost or stolen property, or damages resulting from guest negligence, weather conditions, or circumstances beyond our control. We recommend travel insurance for all guests.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>8. Environmental and Sustainability</h2>
-        <p>We are committed to environmental conservation and sustainable tourism. Guests are expected to respect our eco-friendly policies, including proper waste disposal, water conservation, and protection of marine life and coral reefs.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>9. Force Majeure</h2>
-        <p>Kina Resort is not liable for cancellations or service interruptions due to natural disasters, government restrictions, pandemics, or other force majeure events. In such cases, we will work with guests to reschedule or provide appropriate alternatives.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>10. Governing Law and Disputes</h2>
-        <p>These terms are governed by Philippine law. Any disputes will be resolved through local courts in the Philippines. We encourage amicable resolution of any concerns through direct communication with resort management.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>11. Changes to Terms</h2>
-        <p>We reserve the right to modify these terms at any time. Significant changes will be communicated to guests with advance notice. Continued use of our services constitutes acceptance of updated terms.</p>
-      </div>
-    </section>
-
-    <section class="terms-content">
-      <div class="container">
-        <h2>12. Contact Information</h2>
-        <p>For questions about these Terms and Conditions or resort services, please contact us:</p>
+        <h2>6. Your Rights and Choices</h2>
+        <p>You have the right to:</p>
         <ul>
-          <li><strong>Email:</strong> book@kinaresort.ph</li>
+          <li>Access and request a copy of your personal information</li>
+          <li>Correct inaccurate or incomplete information</li>
+          <li>Request deletion of your personal information</li>
+          <li>Opt-out of marketing communications at any time</li>
+          <li>Object to the processing of your personal information</li>
+          <li>Request restriction of processing your information</li>
+        </ul>
+        <p>To exercise these rights, please contact us using the information provided in the Contact section below.</p>
+      </div>
+    </section>
+
+    <section class="terms-content">
+      <div class="container">
+        <h2>7. Cookies and Tracking Technologies</h2>
+        <p>Our website uses cookies and similar tracking technologies to enhance your browsing experience, analyze website traffic, and personalize content. You can control cookie preferences through your browser settings, but disabling cookies may limit some website functionality.</p>
+      </div>
+    </section>
+
+    <section class="terms-content">
+      <div class="container">
+        <h2>8. Children's Privacy</h2>
+        <p>Our services are not directed to children under the age of 18. We do not knowingly collect personal information from children. If you believe we have collected information from a child, please contact us immediately.</p>
+      </div>
+    </section>
+
+    <section class="terms-content">
+      <div class="container">
+        <h2>9. Changes to This Privacy Policy</h2>
+        <p>We may update this Privacy Policy from time to time to reflect changes in our practices or for legal, operational, or regulatory reasons. We will notify you of any material changes by posting the updated policy on our website and updating the "Last Updated" date.</p>
+      </div>
+    </section>
+
+    <section class="terms-content">
+      <div class="container">
+        <h2>10. Contact Us</h2>
+        <p>If you have any questions, concerns, or requests regarding this Privacy Policy or our data practices, please contact us:</p>
+        <ul>
+          <li><strong>Email:</strong> privacy@kinaresort.ph</li>
           <li><strong>Phone:</strong> +63 900 111 2222</li>
           <li><strong>Address:</strong> M.H Del Pilar Street, San Rafael, Rodriguez, Rizal, Philippines</li>
           <li><strong>Resort Hours:</strong> Open daily, 8:00 AM - 10:00 PM</li>
@@ -135,7 +135,7 @@ export function TermsPage() {
     <section class="terms-content">
       <div class="container">
         <div class="last-updated">
-          <p><strong>Important Note:</strong> These terms and conditions are subject to change without notice. Please review them periodically for any updates. By booking with Kina Resort, you acknowledge that you have read, understood, and agree to these terms.</p>
+          <p><strong>Important Note:</strong> By using our website and services, you acknowledge that you have read and understood this Privacy Policy. Your continued use of our services constitutes acceptance of any updates to this policy.</p>
         </div>
       </div>
     </section>
@@ -318,3 +318,4 @@ export function TermsPage() {
     </style>
   `;
 }
+
