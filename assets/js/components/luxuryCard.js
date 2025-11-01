@@ -134,7 +134,7 @@ export const allPackages = {
       title: 'Standard Cottage',
       price: '₱9,500/night',
       capacity: 6,
-      description: 'Private cottage with direct beach access, outdoor seating area, and basic amenities.',
+      description: 'Private cottage with scenic views, outdoor seating area, and basic amenities.',
       category: 'cottages',
       groupDiscount: true,
       discountText: '10% off for groups of 4+ guests'
@@ -172,9 +172,9 @@ export const allPackages = {
     },
     {
       image: 'images/kina2.jpg',
-      title: 'Ocean View Room',
+      title: 'Scenic View Room',
       price: '₱7,200/night',
-      description: 'Room with balcony overlooking the ocean, perfect for sunset views.',
+      description: 'Room with balcony overlooking scenic mountains, perfect for sunset views.',
       category: 'rooms',
       groupDiscount: true,
       discountText: '10% off for groups of 4+ guests'

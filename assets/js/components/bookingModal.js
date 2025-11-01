@@ -59,7 +59,7 @@ function resetBookingModalState() {
 
 // Room types for selection
 const roomTypes = ['Room A1', 'Room A2', 'Room A3', 'Room A4'];
-const cottageTypes = ['Beachfront Cottage', 'Garden View Cottage', 'Family Cottage'];
+const cottageTypes = ['Standard Cottage', 'Garden View Cottage', 'Family Cottage'];
 const functionHallTypes = ['Grand Function Hall', 'Intimate Function Hall'];
 
 // Mock reservation data for consistent availability

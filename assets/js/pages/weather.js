@@ -36,7 +36,7 @@ export async function WeatherPage(){
       } else if (tempNum >= 32) {
         return { icon: '🏊', text: 'Ideal for pool & water activities', color: '#42a5f5' };
       } else if (tempNum >= 25 && tempNum < 32) {
-        return { icon: '🏖️', text: 'Perfect for beach access & outdoor resort activities', color: '#26a69a' };
+        return { icon: '🌳', text: 'Perfect for outdoor resort activities & nature walks', color: '#26a69a' };
       } else if (tempNum >= 20 && tempNum < 25) {
         return { icon: '🚶', text: 'Great weather for resort tours & garden walks', color: '#66bb6a' };
       } else {

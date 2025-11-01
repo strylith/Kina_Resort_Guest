@@ -34,10 +34,10 @@ export function TermsPage() {
         <p>Kina Resort offers luxury accommodations, dining services, recreational activities, and resort amenities. All services are subject to availability and seasonal variations. We reserve the right to modify or discontinue services with reasonable notice.</p>
         
         <h3>2.1 Accommodation Services</h3>
-        <p>Our resort features luxury cottages, ocean-view rooms, and premium suites. All accommodations include daily housekeeping, resort amenities, and access to resort facilities.</p>
+        <p>Our resort features luxury cottages, scenic-view rooms, and premium suites. All accommodations include daily housekeeping, resort amenities, and access to resort facilities.</p>
         
         <h3>2.2 Dining and Culinary Services</h3>
-        <p>We offer fine dining experiences, beachside dining, and room service. Special dietary requirements can be accommodated with advance notice.</p>
+        <p>We offer fine dining experiences, outdoor dining, and room service. Special dietary requirements can be accommodated with advance notice.</p>
       </div>
     </section>
 

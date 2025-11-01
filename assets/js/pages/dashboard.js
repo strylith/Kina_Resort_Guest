@@ -14,7 +14,7 @@ export async function DashboardPage() {
   const mockBookings = [
     {
       id: 'b1',
-      room: 'Deluxe Ocean View',
+      room: 'Deluxe Scenic View',
       checkIn: '2024-12-15',
       checkOut: '2024-12-18',
       status: 'Confirmed',
@@ -202,7 +202,7 @@ export async function DashboardPage() {
               <p>From $299/night</p>
             </div>
             <div class="room-item" onclick="location.hash='#/rooms'">
-              <h4>Ocean View</h4>
+              <h4>Scenic View</h4>
               <p>From $399/night</p>
             </div>
             <div class="room-item" onclick="location.hash='#/rooms'">

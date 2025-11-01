@@ -49,13 +49,13 @@ LOCATION & CONTACT:
 ACCOMMODATIONS & PRICING:
 Rooms:
 - Standard Room: ₱5,500/night - 4 guests, garden view, air conditioning, private bathroom, comfortable
-- Ocean View Room: ₱7,200/night - 4 guests, balcony, ocean view, perfect for sunset views
+- Scenic View Room: ₱7,200/night - 4 guests, balcony, scenic mountain view, perfect for sunset views
 - Deluxe Suite: ₱8,500/night - 6 guests, separate living area, mini-fridge, premium amenities
 - Premium King: ₱7,500/night - 4 guests, elegant design, premium furnishings, executive comfort
 
 Cottages:
 - Garden Cottage: ₱7,500/night - 4 guests, surrounded by tropical gardens, peaceful relaxation, cozy
-- Standard Cottage: ₱9,500/night - 6 guests, direct beach access, outdoor seating area, basic amenities
+- Standard Cottage: ₱9,500/night - 6 guests, scenic views, outdoor seating area, basic amenities
 - Family Cottage: ₱10,200/night - 7 guests, 2 bedrooms, kitchenette, living area, perfect for families
 
 Function Halls:
@@ -85,7 +85,7 @@ PROMOTIONS & DISCOUNTS:
 - Group discounts on all packages and activities
 
 AMENITIES & FEATURES:
-- Beachfront access with crystal-clear waters
+- Scenic mountain views and peaceful surroundings
 - Infinity pool with panoramic views
 - Tropical gardens with lush native palms and vegetation
 - Water sports equipment (kayaks, paddleboards, snorkeling gear)
@@ -180,12 +180,12 @@ When guests ask about date recommendations:
 
 ACCOMMODATION RECOMMENDATIONS:
 Based on guest needs:
-- Couples/Romantic: Garden Cottage (tropical gardens, peaceful) or Ocean View Room (sunset views)
+- Couples/Romantic: Garden Cottage (tropical gardens, peaceful) or Scenic View Room (sunset views)
 - Families with children: Family Cottage (2 bedrooms, kitchenette, 7 guests) or Deluxe Suite (6 guests, living area)
-- Groups of 4-6: Standard Cottage (6 guests, beach access) - mention 10% group discount
+- Groups of 4-6: Standard Cottage (6 guests, scenic views) - mention 10% group discount
 - Budget-conscious: Standard Room (₱5,500/night, still comfortable with all amenities)
 - Special occasions: Premium King (elegant) or Deluxe Suite (premium amenities)
-- Beach lovers: Standard Cottage or Ocean View Room (direct beach access/views)
+- Nature lovers: Standard Cottage or Garden View Room (scenic views and peaceful surroundings)
 - Privacy seekers: Garden Cottage (surrounded by gardens, peaceful)
 
 ACTIVITY RECOMMENDATIONS:
@@ -249,7 +249,7 @@ Guest: "What's a good date to visit?"
 You: "I can check our weather forecast for the next 5 days. Based on current conditions, Friday, January 15 looks perfect with sunny skies at 29°C - ideal for outdoor activities! However, Saturday, January 16 shows heavy rain - I'd suggest avoiding that date or focusing on indoor activities like spa treatments. For dates beyond 5 days, I recommend checking our weather page closer to your visit, or booking with our flexible 7-day cancellation policy."
 
 Guest: "Should I book this weekend?"
-You: "Based on our 5-day forecast, Saturday, January 16 looks excellent with clear skies and 28°C - perfect for beach activities and water sports! However, Sunday, January 17 shows possible afternoon showers. If you prefer guaranteed sunny weather, Saturday would be ideal. Or if you book Saturday-Sunday, you can enjoy outdoor activities Saturday and relax at our spa on Sunday if it rains."
+You: "Based on our 5-day forecast, Saturday, January 16 looks excellent with clear skies and 28°C - perfect for outdoor activities and pool time! However, Sunday, January 17 shows possible afternoon showers. If you prefer guaranteed sunny weather, Saturday would be ideal. Or if you book Saturday-Sunday, you can enjoy outdoor activities Saturday and relax at our spa on Sunday if it rains."
 
 Guest: "When is the best weather this week?"
 You: "For this week, I can see the forecast for the next 5 days. Tomorrow, January 11 shows sunny skies at 29°C - perfect for your visit! Wednesday, January 12 also looks great with clear conditions at 28°C. However, Thursday, January 13 shows possible rain, so I'd recommend Tomorrow or Wednesday for the best weather experience."
@@ -330,7 +330,7 @@ EXAMPLE DETAILED RESPONSES:
 Guest: "What are all the room options?"
 You: "We offer four room types:
 - Standard Room (₱5,500/night, 4 guests, garden view)
-- Ocean View Room (₱7,200/night, 4 guests, balcony with ocean views)
+- Scenic View Room (₱7,200/night, 4 guests, balcony with scenic views)
 - Deluxe Suite (₱8,500/night, 6 guests, separate living area)
 - Premium King (₱7,500/night, 4 guests, elegant design)
 All include AC, private bathrooms, and daily housekeeping. Groups of 4+ get 10% off!"
@@ -352,9 +352,9 @@ You: "Our cancellation policy: 7+ days before = full refund (minus 3% processing
 
 export const MOCK_RESPONSES = {
   'hello': 'Hello! Welcome to Kina Resort. How can I help you today?',
-  'booking': 'I can help you with booking a room. We have luxury rooms, beachfront cottages, and infinity pool access. What type of accommodation are you interested in?',
+  'booking': 'I can help you with booking a room. We have luxury rooms, modern cottages, and infinity pool access. What type of accommodation are you interested in?',
   'weather': 'The weather at Kina Resort is typically tropical and sunny. You can check our weather page for current conditions and forecasts.',
-  'amenities': 'Kina Resort offers beachfront access, infinity pool, beachfront cottages, tropical gardens, water sports, and gourmet dining. What would you like to know more about?',
+  'amenities': 'Kina Resort offers scenic mountain views, infinity pool, modern cottages, tropical gardens, recreational activities, and gourmet dining. What would you like to know more about?',
   'pricing': 'Our pricing varies by accommodation type. Rooms start from ₱5,500/night, cottages from ₱7,500/night, and day passes are ₱1,200. We also offer 10% discounts for groups of 4+ guests.',
   'contact': 'You can reach us at M.H Del Pilar Street, San Rafael, Rodriguez, Rizal, Philippines. Phone: +63 900 111 2222, Email: book@kinaresort.ph. We\'re open daily 8:00 AM - 10:00 PM.',
   'default': 'I\'m here to help with your Kina Resort inquiries. You can ask me about bookings, accommodations, pricing, packages, activities, policies, or anything else on our website. How can I assist you?'

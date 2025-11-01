@@ -320,7 +320,7 @@ function generateSuggestion(current, forecast) {
   } else if (temp > 32) {
     return 'Hot day ahead! Stay hydrated and enjoy the pool.';
   } else if (temp >= 25 && temp <= 32) {
-    return 'Perfect weather for outdoor activities and beach visits!';
+    return 'Perfect weather for outdoor activities and resort exploration!';
   } else {
     return 'Cooler day. Great for exploring or relaxing by the resort.';
   }

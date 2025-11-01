@@ -27,11 +27,11 @@ function initializePackages() {
     },
     {
       id: 2,
-      title: 'Ocean View Room',
+      title: 'Scenic View Room',
       category: 'rooms',
       price: '₱7,200/night',
       capacity: 4,
-      description: 'Room with balcony overlooking the ocean, perfect for sunset views.',
+      description: 'Room with balcony overlooking scenic mountains, perfect for sunset views.',
       image_url: 'images/kina2.jpg',
       created_at: new Date().toISOString()
     },
@@ -62,7 +62,7 @@ function initializePackages() {
       category: 'cottages',
       price: '₱9,500/night',
       capacity: 6,
-      description: 'Private cottage with direct beach access, outdoor seating area, and basic amenities.',
+      description: 'Private cottage with scenic views, outdoor seating area, and basic amenities.',
       image_url: 'images/cottage_1.JPG',
       created_at: new Date().toISOString()
     },

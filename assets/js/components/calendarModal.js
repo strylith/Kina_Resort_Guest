@@ -25,10 +25,10 @@ let calendarState = {
 // - Most other dates: Available for testing
 const mockReservationData = {
   'Standard Room': 15,
-  'Ocean View Room': 12,
+  'Scenic View Room': 12,
   'Deluxe Suite': 18,
   'Premium King': 20,
-  'Beachfront Cottage': 8,
+  'Standard Cottage': 8,
   'Garden View Cottage': 10,
   'Family Cottage': 14,
   'Grand Function Hall': 5,

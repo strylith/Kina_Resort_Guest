@@ -1,7 +1,7 @@
 {
   "name": "kina-resort",
   "version": "1.0.0",
-  "description": "Kina Resort - Beach Resort Reservation System",
+  "description": "Kina Resort - Mountain Resort Reservation System",
   "scripts": {
     "start": "cd server && npm install && npm start",
     "server": "cd server && npm start",

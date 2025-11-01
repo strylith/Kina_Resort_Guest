@@ -119,10 +119,10 @@ CREATE INDEX IF NOT EXISTS idx_packages_category ON public.packages(category);
 -- Insert sample packages
 INSERT INTO public.packages (title, category, price, capacity, description, image_url) VALUES
 ('Standard Room', 'rooms', '₱5,500/night', 4, 'Comfortable room with air conditioning, private bathroom, and garden view.', 'images/kina1.jpg'),
-('Ocean View Room', 'rooms', '₱7,200/night', 4, 'Room with balcony overlooking the ocean, perfect for sunset views.', 'images/kina2.jpg'),
+('Scenic View Room', 'rooms', '₱7,200/night', 4, 'Room with balcony overlooking scenic mountains, perfect for sunset views.', 'images/kina2.jpg'),
 ('Deluxe Suite', 'rooms', '₱8,500/night', 6, 'Spacious suite with separate living area, mini-fridge, and premium amenities.', 'images/kina3.jpg'),
 ('Premium King', 'rooms', '₱7,500/night', 7, 'Executive comfort with elegant design and premium furnishings.', 'images/resort1.JPG'),
-('Beachfront Cottage', 'cottages', '₱9,500/night', 6, 'Private cottage with direct beach access, outdoor seating area, and basic amenities.', 'images/cottage_1.JPG'),
+('Standard Cottage', 'cottages', '₱9,500/night', 6, 'Private cottage with scenic views, outdoor seating area, and basic amenities.', 'images/cottage_1.JPG'),
 ('Garden Cottage', 'cottages', '₱7,500/night', 4, 'Cozy cottage surrounded by tropical gardens, perfect for peaceful relaxation.', 'images/cottage_2.JPG'),
 ('Family Cottage', 'cottages', '₱10,200/night', 7, 'Spacious cottage with 2 bedrooms, kitchenette, and living area for families.', 'images/kina1.jpg'),
 ('Grand Function Hall', 'function-halls', '₱15,000/day', 200, 'Spacious hall perfect for weddings, conferences, and large events. Includes tables, chairs, sound system, and air conditioning.', 'images/Function Hall.JPG'),

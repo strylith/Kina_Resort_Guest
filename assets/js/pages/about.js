@@ -19,16 +19,12 @@ export async function AboutPage() {
         
         <div class="about-features">
           <div class="feature-item">
-            <h3>🏖️ Beachfront Access</h3>
-            <p>Direct access to pristine beaches with crystal-clear waters</p>
-          </div>
-          <div class="feature-item">
             <h3>🏊 Infinity Pool</h3>
-            <p>Our signature infinity pool offers panoramic ocean views</p>
+            <p>Our signature infinity pool offers panoramic mountain views</p>
           </div>
           <div class="feature-item">
-            <h3>🏠 Beachfront Cottages</h3>
-            <p>Modern accommodations with direct beach access</p>
+            <h3>🏠 Modern Cottages</h3>
+            <p>Comfortable accommodations with scenic surroundings</p>
           </div>
           <div class="feature-item">
             <h3>🌴 Tropical Gardens</h3>

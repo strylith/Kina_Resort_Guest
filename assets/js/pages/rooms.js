@@ -2,9 +2,9 @@ import { showToast } from '../components/toast.js';
 import { openModal } from '../components/modal.js';
 
 const mockRooms = [
-  { id:'r1', title:'Deluxe King', price:6500, img:'images/kina1.jpg', amenities:['King bed','Sea view','Breakfast'] },
+  { id:'r1', title:'Deluxe King', price:6500, img:'images/kina1.jpg', amenities:['King bed','Mountain view','Breakfast'] },
   { id:'r2', title:'Twin Garden', price:5200, img:'images/kina2.jpg', amenities:['Twin beds','Garden view','Wi‑Fi'] },
-  { id:'r3', title:'Suite Oceanfront', price:9800, img:'images/kina3.jpg', amenities:['Suite','Oceanfront','Balcony'] },
+  { id:'r3', title:'Suite Scenic', price:9800, img:'images/kina3.jpg', amenities:['Suite','Scenic View','Balcony'] },
 ];
 
 export async function RoomsPage(){

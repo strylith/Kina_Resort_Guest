@@ -35,11 +35,11 @@ beforeAll(() => {
       },
       {
         id: 2,
-        title: 'Beachfront Cottage',
+        title: 'Standard Cottage',
         category: 'cottages',
         price: '₱9,500/night',
         capacity: 6,
-        description: 'Beach access cottage',
+        description: 'Scenic views cottage',
         image_url: 'images/cottage1.jpg',
         created_at: new Date().toISOString()
       }
