@@ -16,11 +16,11 @@ if ($nodeProcesses) {
 }
 
 # Set environment variables
-$env:USE_MOCK_DB = "true"
+$env:USE_MOCK_DB = "false"
 $env:NODE_ENV = "development"
 
-Write-Host "`n🚀 Starting server with mock database..." -ForegroundColor Green
-Write-Host "   Packages will be seeded automatically" -ForegroundColor Gray
+Write-Host "`n🚀 Starting server with real Supabase..." -ForegroundColor Green
+Write-Host "   Connected to kina schema" -ForegroundColor Gray
 Write-Host ""
 
 # Start the server

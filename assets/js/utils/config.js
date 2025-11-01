@@ -2,8 +2,8 @@
 // Determines run mode and API base URLs; feature flags for placeholders
 
 export function getRunMode() {
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  return isLocalhost ? 'mock' : 'api';
+  // Always use real API now that backend uses real Supabase
+  return 'api';
 }
 
 export function isProduction() {

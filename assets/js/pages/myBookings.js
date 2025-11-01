@@ -24,8 +24,31 @@ export async function MyBookingsPage() {
     const user = authState.user;
     if (user && (user.id || user.email)) {
       const userBookings = allBookings.filter(b => {
-        const matchesId = (b.user_id === user.id || b.userId === user.id);
-        const matchesEmail = (b.guest_email === user.email || b.email === user.email);
+        // Try both UUID string comparison and case-insensitive comparison
+        const matchesId = (
+          (b.user_id === user.id) || 
+          (String(b.user_id) === String(user.id)) ||
+          (b.userId === user.id) ||
+          (String(b.userId) === String(user.id))
+        );
+        const matchesEmail = (
+          (b.guest_email === user.email) || 
+          (b.email === user.email) ||
+          (String(b.guest_email || '').toLowerCase() === String(user.email || '').toLowerCase())
+        );
+        
+        if (!matchesId && !matchesEmail) {
+          console.log('[MyBookings] Booking filtered out:', {
+            bookingId: b.id,
+            bookingUserId: b.user_id || b.userId,
+            bookingEmail: b.guest_email || b.email,
+            currentUserId: user.id,
+            currentUserEmail: user.email,
+            idMatch: matchesId,
+            emailMatch: matchesEmail
+          });
+        }
+        
         return matchesId || matchesEmail;
       });
       
@@ -33,7 +56,8 @@ export async function MyBookingsPage() {
         totalBookings: allBookings.length,
         userBookings: userBookings.length,
         userId: user.id,
-        email: user.email
+        email: user.email,
+        userIdType: typeof user.id
       });
       
       // Debug log for verification
@@ -50,7 +74,7 @@ export async function MyBookingsPage() {
     
     console.log('[MyBookings] Final bookings count:', {
       count: allBookings.length,
-      ids: allBookings.map(b => b.id).join(', ')
+      ids: allBookings.map(b => ({ id: b.id, type: typeof b.id, user_id: b.user_id }))
     });
   } catch (error) {
     console.error('Failed to fetch bookings:', error);
@@ -114,12 +138,28 @@ export async function MyBookingsPage() {
 
   // Edit booking function
   window.kinaEditBooking = async (bookingId) => {
-    console.log('[Re-Edit] Button clicked, bookingId:', bookingId);
+    console.log('[Re-Edit] Button clicked, bookingId:', bookingId, 'type:', typeof bookingId);
+    console.log('[Re-Edit] Current allBookings:', {
+      count: allBookings.length,
+      ids: allBookings.map(b => ({ id: b.id, type: typeof b.id, user_id: b.user_id }))
+    });
     
     try {
-      const booking = allBookings.find(b => b.id === bookingId);
+      // Try both string and number comparison since IDs might be mixed types
+      const booking = allBookings.find(b => {
+        const bookingIdNum = Number(bookingId);
+        const bookingIdStr = String(bookingId);
+        return b.id === bookingId || b.id === bookingIdNum || String(b.id) === bookingIdStr;
+      });
+      
       if (!booking) {
         console.error('[Re-Edit] Booking not found in list:', bookingId);
+        console.error('[Re-Edit] Available booking IDs:', allBookings.map(b => ({ id: b.id, type: typeof b.id })));
+        console.error('[Re-Edit] Current user:', {
+          id: authState.user?.id,
+          email: authState.user?.email,
+          userIdType: typeof authState.user?.id
+        });
         showToast('Booking not found', 'error');
         return;
       }
@@ -202,7 +242,17 @@ export async function MyBookingsPage() {
         preFillData.endTime = fhMetadata.endTime || booking.end_time || booking.dates?.endTime || null;
         preFillData.decorationTheme = fhMetadata.decorationTheme || booking.decoration_theme || booking.selections?.decorationTheme || null;
         preFillData.organization = fhMetadata.organization || booking.organization || booking.selections?.organization || null;
-        preFillData.guestCount = (typeof booking.guests === 'object' ? booking.guests.total : booking.guests) || null;
+        // Handle both new format (adults+children) and old format (total) for backward compatibility
+        let guestCount = null;
+        if (typeof booking.guests === 'object') {
+          const adults = booking.guests.adults || 0;
+          const children = booking.guests.children || 0;
+          const total = booking.guests.total || 0;
+          guestCount = (adults + children > 0) ? (adults + children) : (total || null);
+        } else {
+          guestCount = booking.guests || null;
+        }
+        preFillData.guestCount = guestCount;
         preFillData.soundSystemRequired = fhMetadata.soundSystemRequired !== undefined ? fhMetadata.soundSystemRequired : (booking.sound_system_required || booking.selections?.soundSystemRequired || false);
         preFillData.projectorRequired = fhMetadata.projectorRequired !== undefined ? fhMetadata.projectorRequired : (booking.projector_required || booking.selections?.projectorRequired || false);
         preFillData.cateringRequired = fhMetadata.cateringRequired !== undefined ? fhMetadata.cateringRequired : (booking.catering_required || booking.selections?.cateringRequired || false);
@@ -274,7 +324,9 @@ export async function MyBookingsPage() {
         booking.packages?.title || 'Booking',
         preFillData,
         true,  // editMode
-        bookingId
+        bookingId,
+        booking.category || booking.packages?.category,  // category
+        booking.package_id  // package_id
       );
       
       console.log('[Re-Edit] Modal open call completed');
@@ -505,14 +557,24 @@ export async function MyBookingsPage() {
       
       let guestsDisplay = '';
       if (typeof booking.guests === 'object') {
-        // Function halls use {total: X} format
-        if (isFunctionHall && booking.guests.total !== undefined) {
+        // Check for adults/children format first (new format, preferred)
+        if (booking.guests.adults !== undefined || booking.guests.children !== undefined) {
+          const adults = booking.guests.adults || 0;
+          const children = booking.guests.children || 0;
+          const total = adults + children;
+          if (isFunctionHall) {
+            // Function halls: show total count
+            guestsDisplay = `${total} Guests`;
+            console.log('[generateBookingRows] Function hall - using adults+children:', total);
+          } else {
+            // Rooms and cottages: show adults and children separately
+            guestsDisplay = `${adults}A, ${children}C`;
+            console.log('[generateBookingRows] Room/cottage - using adults/children:', guestsDisplay);
+          }
+        } else if (isFunctionHall && booking.guests.total !== undefined) {
+          // Backward compatibility: old function hall format with total
           guestsDisplay = `${booking.guests.total} Guests`;
-          console.log('[generateBookingRows] Function hall - using total:', booking.guests.total);
-        } else if (booking.guests.adults !== undefined || booking.guests.children !== undefined) {
-          // Rooms and cottages use {adults: X, children: Y} format
-          guestsDisplay = `${booking.guests.adults || 0}A, ${booking.guests.children || 0}C`;
-          console.log('[generateBookingRows] Room/cottage - using adults/children:', guestsDisplay);
+          console.log('[generateBookingRows] Function hall - using total (backward compat):', booking.guests.total);
         } else {
           guestsDisplay = 'N/A';
           console.warn('[generateBookingRows] Unknown guests format:', booking.guests);

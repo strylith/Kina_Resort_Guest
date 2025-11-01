@@ -28,7 +28,8 @@ export const authenticateToken = async (req, res, next) => {
     }
     
     // Get user from Auth to ensure they still exist
-    const { data: user, error } = await dbAuth.admin.getUserById(decoded.userId);
+    const { data, error } = await dbAuth.admin.getUserById(decoded.userId);
+    const user = data?.user || data; // Handle both Supabase response formats
     
     console.log('[Auth] User lookup result:', { 
       found: !!user, 

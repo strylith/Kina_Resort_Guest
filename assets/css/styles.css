@@ -4637,6 +4637,28 @@ body.modal-open {
   font-weight: 600;
 }
 
+/* Function hall availability styles - matching cottage/room design pattern */
+.calendar-date.function-hall-available {
+  background-color: #f3e5f5 !important;  /* Same purple as cottages/rooms */
+  color: #6a1b9a !important;  /* Same purple text as cottages */
+}
+
+.calendar-date.function-hall-partial {
+  background-color: #fff9c4 !important;  /* Same yellow as cottage-partial */
+  color: #f57c00 !important;
+}
+
+.calendar-date.function-hall-booked-all {
+  background-color: #ef5350 !important;  /* Same red as cottages */
+  color: white !important;
+}
+
+.calendar-date.function-hall-booked-partial {
+  background-color: #fff9c4 !important;  /* Same yellow as cottage-partial */
+  color: #f57c00 !important;
+  font-weight: 600;
+}
+
 .booked-cottages-label {
   position: absolute;
   bottom: 2px;
@@ -4830,6 +4852,19 @@ body.modal-open {
 
 .legend-color.cottage-booked {
   background: #ef5350;
+}
+
+/* Function hall availability legend colors - matching cottage design */
+.legend-color.function-hall-available {
+  background: #f3e5f5;  /* Same purple as cottages */
+}
+
+.legend-color.function-hall-partial {
+  background: #fff9c4;  /* Same yellow as cottage-partial */
+}
+
+.legend-color.function-hall-booked-all {
+  background: #ef5350;  /* Same red as cottages */
 }
 
 /* Unavailable Room Styling */
@@ -7021,4 +7056,227 @@ input[type="date"][readonly]:hover {
 .legend-color.today {
   background: #fff3e0;
   border: 2px solid #f57c00;
+}
+
+/* Availability Modal Styles */
+.availability-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.availability-modal-overlay.show {
+  opacity: 1;
+}
+
+.availability-modal {
+  background: white;
+  border-radius: 16px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  position: relative;
+  transform: scale(0.9);
+  transition: transform 0.3s ease;
+}
+
+.availability-modal-overlay.show .availability-modal {
+  transform: scale(1);
+}
+
+.availability-modal-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 32px;
+  height: 32px;
+  background: #f5f5f5;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.availability-modal-close:hover {
+  background: #e5e5e5;
+  color: #333;
+}
+
+.availability-info {
+  padding: 30px;
+}
+
+.availability-info h3 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.availability-date {
+  font-size: 18px;
+  color: var(--color-muted);
+  margin-bottom: 24px;
+  font-weight: 500;
+}
+
+.availability-summary {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.availability-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.stat-value.available {
+  color: #28a745;
+}
+
+.stat-value.booked {
+  color: #dc3545;
+}
+
+.availability-details {
+  margin-bottom: 16px;
+}
+
+.availability-details strong {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.items-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.item-tag {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.item-tag.available {
+  background: #d4edda;
+  color: #155724;
+}
+
+.item-tag.booked {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.availability-warning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  color: #856404;
+  margin-top: 16px;
+}
+
+.availability-modal-actions {
+  display: flex;
+  gap: 12px;
+  padding: 20px 30px;
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+
+.availability-modal-close-btn,
+.availability-modal-book-btn {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.availability-modal-close-btn {
+  background: #f5f5f5;
+  color: var(--color-text);
+}
+
+.availability-modal-close-btn:hover {
+  background: #e5e5e5;
+}
+
+.availability-modal-book-btn {
+  background: var(--color-accent);
+  color: white;
+}
+
+.availability-modal-book-btn:hover:not(:disabled) {
+  background: #2a9ce8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.availability-modal-book-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .availability-modal {
+    width: 95%;
+    max-height: 85vh;
+  }
+  
+  .availability-info {
+    padding: 20px;
+  }
+  
+  .availability-summary {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .availability-modal-actions {
+    flex-direction: column;
+  }
+  
+  .availability-modal-close-btn,
+  .availability-modal-book-btn {
+    width: 100%;
+  }
 }

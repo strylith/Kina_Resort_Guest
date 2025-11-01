@@ -2,6 +2,7 @@
 // Handles Room, Cottage, and Function Hall reservations
 
 import { bookingState } from '../utils/bookingState.js';
+import { normalizeDateInputToYMD } from '../utils/calendarUtils.js';
 
 // Constants
 const ROOM_CAPACITY = 4; // Maximum guests per room
@@ -150,6 +151,15 @@ async function isRoomAvailable(roomId, checkinDate, checkoutDate) {
 // Check if cottage is available for given date (using database)
 async function isCottageAvailable(cottageId, visitDate) {
   try {
+    // Normalize date to ensure consistent format
+    const normalizedDate = normalizeDateInputToYMD(visitDate);
+    if (!normalizedDate) {
+      console.error('[isCottageAvailable] Failed to normalize date:', visitDate);
+      return true; // Default to available on error
+    }
+    
+    console.log(`[isCottageAvailable] Checking cottage ${cottageId} for date: ${visitDate} -> normalized: ${normalizedDate}`);
+    
     const { checkAvailability } = await import('../utils/api.js');
     
     // Exclude current booking from conflict checks if in edit mode
@@ -157,35 +167,44 @@ async function isCottageAvailable(cottageId, visitDate) {
       ? bookingFormState.bookingId 
       : null;
     
-    // Single-day cottage booking: check_in === check_out === visitDate
-    const result = await checkAvailability(1, visitDate, visitDate, 'cottages', excludeBookingId);
+    // Single-day cottage booking: check_in === check_out === visitDate (use normalized date)
+    const result = await checkAvailability(1, normalizedDate, normalizedDate, 'cottages', excludeBookingId);
     
-    if (result && result.dateAvailability && result.dateAvailability[visitDate]) {
-      const dayData = result.dateAvailability[visitDate];
-      const availableCottages = dayData.availableCottages || [];
-      const isAvailable = availableCottages.includes(cottageId);
+    if (result && result.dateAvailability) {
+      // Use normalized date as key for lookup
+      const dayData = result.dateAvailability[normalizedDate];
       
-      console.log(`[Booking] Cottage ${cottageId} availability on ${visitDate}:`, isAvailable ? 'AVAILABLE' : 'NOT AVAILABLE');
-      
-      return isAvailable;
+      if (dayData) {
+        const availableCottages = dayData.availableCottages || [];
+        const isAvailable = availableCottages.includes(cottageId);
+        
+        console.log(`[isCottageAvailable] Cottage ${cottageId} availability on ${normalizedDate}:`, isAvailable ? 'AVAILABLE' : 'NOT AVAILABLE');
+        console.log(`[isCottageAvailable] Available cottages on ${normalizedDate}:`, availableCottages);
+        
+        return isAvailable;
+      } else {
+        console.warn(`[isCottageAvailable] No dayData for ${normalizedDate}. Available dates:`, Object.keys(result.dateAvailability).join(', '));
+      }
     }
     
-    console.log(`[Booking] No availability data for cottage ${cottageId} on ${visitDate}, defaulting to available`);
+    console.log(`[isCottageAvailable] No availability data for cottage ${cottageId} on ${normalizedDate}, defaulting to available`);
     return true; // Default to available if no data
   } catch (error) {
-    console.error('[Booking] Error checking cottage availability:', error);
+    console.error('[isCottageAvailable] Error checking cottage availability:', error);
     return true; // Allow on error
   }
 }
 
 
 // Open booking modal with optional pre-selection and pre-filled dates
-export function openBookingModal(initialType = 'room', packageTitle = '', preFillData = null, editMode = false, bookingId = null, categoryArg = null) {
+export function openBookingModal(initialType = 'room', packageTitle = '', preFillData = null, editMode = false, bookingId = null, categoryArg = null, packageIdArg = null) {
   console.log('[BookingModal] openBookingModal called:', {
     initialType,
     packageTitle,
     editMode,
     bookingId,
+    categoryArg,
+    packageIdArg,
     hasPreFillData: !!preFillData
   });
   
@@ -240,6 +259,19 @@ export function openBookingModal(initialType = 'room', packageTitle = '', preFil
   bookingFormState.editMode = editMode;
   bookingFormState.bookingId = bookingId;
   bookingFormState.addCottageToRoom = false;
+  
+  // Set package ID if provided (important for re-edit)
+  if (packageIdArg) {
+    bookingFormState.packageId = packageIdArg;
+    console.log('[openBookingModal] Set packageId from argument:', packageIdArg);
+  } else if (preFillData?.packageId) {
+    bookingFormState.packageId = preFillData.packageId;
+    console.log('[openBookingModal] Set packageId from preFillData:', preFillData.packageId);
+  } else {
+    // Will be determined later when creating booking
+    bookingFormState.packageId = null;
+    console.log('[openBookingModal] PackageId not provided, will be determined later');
+  }
   bookingFormState.addRoomToCottage = false;
   bookingFormState.formData = {};
   bookingFormState.errors = {};
@@ -3346,7 +3378,9 @@ function validateForm() {
   
   if (bookingFormState.reservationType === 'cottage') {
     // Require at least one cottage selected via items manager
-    const selectedCottages = bookingState.selectedCottages || [];
+    // Check selectedCottagesFromFlow (primary) - matches submission logic
+    // Fallback to bookingState.selectedCottages for edit mode compatibility
+    const selectedCottages = bookingFormState.selectedCottagesFromFlow || bookingState.selectedCottages || [];
     if (!selectedCottages.length) {
       isValid = false;
       showFieldError('cottage-date', 'Select a cottage type via Add/Remove Items');
@@ -3542,7 +3576,7 @@ async function saveBooking(bookingData) {
         setup_type: bookingData.selections?.setupType,
         decoration_theme: bookingData.selections?.decorationTheme,
         organization: bookingData.selections?.organization,
-        guest_count: Number(bookingData.guests?.total || 0),
+        guest_count: Number((bookingData.guests?.adults || 0) + (bookingData.guests?.children || 0) || bookingData.guests?.total || 0),
         sound_system_required: bookingData.selections?.soundSystemRequired || false,
         projector_required: bookingData.selections?.projectorRequired || false,
         catering_required: bookingData.selections?.cateringRequired || false,
@@ -3700,7 +3734,12 @@ function getTotalGuests(bookingData) {
   } else if (bookingData.reservationType === 'cottage') {
     return parseInt(bookingData.guests.adults) + parseInt(bookingData.guests.children);
   } else if (bookingData.reservationType === 'function-hall') {
-    return parseInt(bookingData.guests.total);
+    // Use adults + children (backward compatible with old total format)
+    const adults = parseInt(bookingData.guests?.adults || 0);
+    const children = parseInt(bookingData.guests?.children || 0);
+    const total = parseInt(bookingData.guests?.total || 0);
+    // Prefer adults+children, fallback to total for backward compatibility
+    return adults + children > 0 ? adults + children : total;
   }
   return 1;
 }
@@ -3801,6 +3840,7 @@ window.submitBooking = async function(event) {
     // Collect per-room guest details
     const perRoomGuests = [];
     if (bookingFormState.selectedRoomsFromFlow?.length > 0) {
+      // Date-first flow: Use per-room guest inputs
       bookingFormState.selectedRoomsFromFlow.forEach(roomId => {
         const guestNameInput = document.getElementById(`${roomId}-guest-name`);
         const adultsInput = document.getElementById(`${roomId}-adults`);
@@ -3813,11 +3853,28 @@ window.submitBooking = async function(event) {
           children: parseInt(childrenInput?.value || 0)
         });
       });
+    } else if (selectedRooms.length > 0) {
+      // Modal-first flow: Create per-room data from selected rooms using main guest counts
+      const mainAdults = parseInt(formData.get('adults') || 1);
+      const mainChildren = parseInt(formData.get('children') || 0);
+      
+      selectedRooms.forEach(roomId => {
+        perRoomGuests.push({
+          roomId: roomId,
+          guestName: bookingData.guestInfo.name, // Use main booker
+          adults: mainAdults,
+          children: mainChildren
+        });
+      });
+      
+      console.log('[Booking] Created per-room guests from modal selection:', perRoomGuests);
     }
     
     // Add to booking data
     if (perRoomGuests.length > 0) {
       bookingData.perRoomGuests = perRoomGuests;
+    } else {
+      console.warn('[Booking] ⚠️ No rooms selected - booking will have no booking_items!');
     }
   } else if (bookingFormState.reservationType === 'cottage') {
     // Use pre-filled date if available (from date-first flow), otherwise from form
@@ -3862,8 +3919,12 @@ window.submitBooking = async function(event) {
       equipmentAddons: Array.from(formData.getAll('equipmentAddons')),
       specialRequests: formData.get('specialRequests')
     };
+    // Convert function hall guest count to standard adults/children format
+    // Function halls use a single guest count input, map it to adults (children = 0)
+    const eventGuestCount = parseInt(formData.get('eventGuests') || 0);
     bookingData.guests = {
-      total: parseInt(formData.get('eventGuests') || 0)
+      adults: eventGuestCount,
+      children: 0
     };
   }
   
@@ -3896,17 +3957,58 @@ window.submitBooking = async function(event) {
           const unavailableRooms = [];
           const dateAvailabilityMap = result.dateAvailability;
           
-          // For each selected room, check if it's available on every date
+          // Filter dates to only include dates within the booking range (checkout is exclusive)
+          const checkInDate = new Date(checkIn);
+          const checkOutDate = new Date(checkOut);
+          checkInDate.setHours(0, 0, 0, 0);
+          checkOutDate.setHours(0, 0, 0, 0);
+          
+          // Get only dates within the booking range (exclusive of checkout date)
+          const datesInRange = Object.keys(dateAvailabilityMap).filter(dateString => {
+            const date = new Date(dateString);
+            date.setHours(0, 0, 0, 0);
+            return date >= checkInDate && date < checkOutDate; // Checkout exclusive
+          });
+          
+          console.log('[Booking] Availability validation:', {
+            checkIn,
+            checkOut,
+            selectedRooms,
+            datesInRange,
+            totalDatesInAvailability: Object.keys(dateAvailabilityMap).length,
+            dateAvailabilityKeys: Object.keys(dateAvailabilityMap)
+          });
+          
+          // For each selected room, check if it's available on every date in the range
           selectedRooms.forEach(selectedRoom => {
             const unavailableDates = [];
             
-            // Check availability of this room on each date in the range
-            Object.entries(dateAvailabilityMap).forEach(([dateString, dayData]) => {
+            // Normalize selected room name for comparison
+            const normalizedSelectedRoom = String(selectedRoom).trim();
+            
+            // Check availability of this room on each date IN THE RANGE
+            datesInRange.forEach(dateString => {
+              const dayData = dateAvailabilityMap[dateString];
+              if (!dayData) {
+                console.warn(`[Booking] No availability data for date ${dateString}`);
+                unavailableDates.push(dateString);
+                return;
+              }
+              
               const availableRooms = dayData.availableRooms || [];
               
+              // Normalize available rooms for comparison
+              const normalizedAvailableRooms = availableRooms.map(room => String(room).trim());
+              
               // If this selected room is NOT in the available rooms list for this date, it's unavailable
-              if (!availableRooms.includes(selectedRoom)) {
+              const isAvailable = normalizedAvailableRooms.includes(normalizedSelectedRoom);
+              
+              if (!isAvailable) {
                 unavailableDates.push(dateString);
+                console.log(`[Booking] Room ${normalizedSelectedRoom} unavailable on ${dateString}:`, {
+                  availableRooms: normalizedAvailableRooms,
+                  selectedRoom: normalizedSelectedRoom
+                });
               }
             });
             
@@ -4122,7 +4224,7 @@ function showBookingSuccess(bookingData, savedBooking) {
           <li><strong>Hall:</strong> ${fh.hallName || fh.hallId || 'N/A'}</li>
           <li><strong>Date:</strong> ${bookingData.dates.eventDate || 'N/A'}</li>
           <li><strong>Time:</strong> ${(bookingData.dates.startTime || '') && (bookingData.dates.endTime || '') ? `${bookingData.dates.startTime} - ${bookingData.dates.endTime}` : 'N/A'}</li>
-          <li><strong>Guests:</strong> ${bookingData.guests?.total || 'N/A'}</li>
+          <li><strong>Guests:</strong> ${(bookingData.guests?.adults || 0) + (bookingData.guests?.children || 0) || bookingData.guests?.total || 'N/A'}</li>
           <li><strong>Event:</strong> ${fh.eventName || 'N/A'} (${fh.eventType || 'type N/A'})</li>
           <li><strong>Setup:</strong> ${fh.setupType || 'N/A'}</li>
           ${fh.decorationTheme ? `<li><strong>Theme:</strong> ${fh.decorationTheme}</li>` : ''}
@@ -4198,7 +4300,7 @@ function showBookingSuccess(bookingData, savedBooking) {
             ${bookingData.reservationType === 'function-hall' ? `
               <div class="summary-item">
                 <span>Total Guests:</span>
-                <strong>${bookingData.guests?.total || 'N/A'} Guests</strong>
+                <strong>${(bookingData.guests?.adults || 0) + (bookingData.guests?.children || 0) || bookingData.guests?.total || 'N/A'} Guests</strong>
               </div>
             ` : `
               <div class="summary-item">
@@ -4335,8 +4437,15 @@ function updateBookingDates(checkinDate, checkoutDate) {
 function updateCottageDate(date) {
   const dateInput = document.getElementById('cottage-date');
   if (dateInput && date) {
-    dateInput.value = date;
-    dateInput.dispatchEvent(new Event('change'));
+    // Normalize date to YYYY-MM-DD format to prevent timezone shifts
+    const normalizedDate = normalizeDateInputToYMD(date);
+    if (normalizedDate) {
+      dateInput.value = normalizedDate;
+      dateInput.dispatchEvent(new Event('change'));
+      console.log('[updateCottageDate] Date normalized:', date, '->', normalizedDate);
+    } else {
+      console.warn('[updateCottageDate] Failed to normalize date:', date);
+    }
   }
 }
 

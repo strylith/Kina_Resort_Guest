@@ -1,59 +1,42 @@
-// Test setup file
-process.env.USE_MOCK_DB = 'true';
+// Test setup file for Supabase integration tests
+process.env.USE_MOCK_DB = 'false';
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-key-for-tests';
 
-// Import mock client
-import { mockClient } from '../db/databaseClient.js';
+// Import test database utilities
+import { cleanupTestData, resetTracking } from './utils/testDb.js';
 
-// Reset database before each test
-beforeEach(() => {
-  mockClient.reset();
+// Clean up test data after each test
+afterEach(async () => {
+  try {
+    await cleanupTestData();
   if (process.env.DEBUG_TESTS) {
-    console.log('🧹 Test database reset');
+      console.log('🧹 Test data cleaned up');
+    }
+  } catch (error) {
+    console.error('Error during test cleanup:', error);
+    // Continue even if cleanup fails to avoid blocking other tests
   }
 });
 
-// Setup default test data
+// Setup test environment
 beforeAll(() => {
   if (process.env.DEBUG_TESTS) {
-    console.log('🧩 Seeding mock database...');
+    console.log('🔗 Connecting to Supabase test database...');
+    console.log('✅ Test environment initialized with real Supabase');
   }
-  
-  // Seed default packages for tests that need them
+});
+
+// Final cleanup after all tests
+afterAll(async () => {
   try {
-    mockClient.seed('packages', [
-      {
-        id: 1,
-        title: 'Standard Room',
-        category: 'rooms',
-        price: '₱5,500/night',
-        capacity: 4,
-        description: 'Comfortable room with air conditioning',
-        image_url: 'images/room1.jpg',
-        created_at: new Date().toISOString()
-      },
-      {
-        id: 2,
-        title: 'Beachfront Cottage',
-        category: 'cottages',
-        price: '₱9,500/night',
-        capacity: 6,
-        description: 'Beach access cottage',
-        image_url: 'images/cottage1.jpg',
-        created_at: new Date().toISOString()
-      }
-    ]);
-    
+    await cleanupTestData();
+    resetTracking();
     if (process.env.DEBUG_TESTS) {
-      console.log('✅ Default test data seeded');
+      console.log('🧹 Final cleanup completed');
     }
   } catch (error) {
-    // Ignore seeding errors - tests will seed their own data
-  }
-  
-  if (process.env.DEBUG_TESTS) {
-    console.log('✅ Test environment initialized');
+    console.error('Error during final cleanup:', error);
   }
 });
 

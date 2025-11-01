@@ -3,6 +3,7 @@ import { initPackagesSlider } from '../components/packagesSlider.js';
 import { openCalendarModal } from '../components/calendarModal.js';
 import { openBookingModal } from '../components/bookingModal.js';
 import { bookingState } from '../utils/bookingState.js';
+import { normalizeDateInputToYMD } from '../utils/calendarUtils.js';
 
 export async function PackagesPage(){
   const data = [
@@ -1605,19 +1606,27 @@ window.exitRoomSelection = function() {
 // Fetch detailed availability for cottage selection
 async function fetchCottageAvailability(visitDate) {
   try {
-    console.log('[fetchCottageAvailability] Fetching availability for date:', visitDate);
+    // Normalize date to YYYY-MM-DD format to ensure consistency
+    const normalizedDate = normalizeDateInputToYMD(visitDate);
+    if (!normalizedDate) {
+      console.error('[fetchCottageAvailability] Failed to normalize date:', visitDate);
+      throw new Error('Invalid date format');
+    }
+    
+    console.log('[fetchCottageAvailability] Fetching availability for date:', visitDate, '-> normalized:', normalizedDate);
     const { checkAvailability } = await import('../utils/api.js');
-    const result = await checkAvailability(1, visitDate, visitDate, 'cottages', null);
+    const result = await checkAvailability(1, normalizedDate, normalizedDate, 'cottages', null);
     
     console.log('[fetchCottageAvailability] API Response:', result);
     console.log('[fetchCottageAvailability] dateAvailability:', result?.dateAvailability);
     console.log('[fetchCottageAvailability] Keys in dateAvailability:', result?.dateAvailability ? Object.keys(result.dateAvailability) : 'N/A');
     
     if (result && result.dateAvailability) {
-      const dayData = result.dateAvailability[visitDate];
+      // Use normalized date as key for lookup
+      const dayData = result.dateAvailability[normalizedDate];
       
       if (dayData) {
-        console.log('[fetchCottageAvailability] Day Data for', visitDate, ':', dayData);
+        console.log('[fetchCottageAvailability] Day Data for', normalizedDate, ':', dayData);
         console.log('[fetchCottageAvailability] Available:', dayData.availableCottages);
         console.log('[fetchCottageAvailability] Booked:', dayData.bookedCottages);
         
@@ -1629,7 +1638,7 @@ async function fetchCottageAvailability(visitDate) {
           bookedCount: dayData.bookedCount
         };
       } else {
-        console.warn('[fetchCottageAvailability] No dayData for', visitDate, 'in dateAvailability. Available dates:', Object.keys(result.dateAvailability).join(', '));
+        console.warn('[fetchCottageAvailability] No dayData for', normalizedDate, 'in dateAvailability. Available dates:', Object.keys(result.dateAvailability).join(', '));
       }
     }
     

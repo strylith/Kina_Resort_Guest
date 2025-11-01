@@ -184,16 +184,25 @@ async function getDateStatus(date, packageId) {
           bookedCount: dateData.bookedCount
         });
         
+        // Determine default status based on category
+        const isFunctionHall = category === 'function-halls';
+        const defaultStatusForCategory = isFunctionHall 
+          ? (isBooked ? 'function-hall-booked-all' : 'function-hall-available')
+          : (isBooked ? 'cottage-booked' : 'cottage-available');
+        
         const status = {
-          status: dateData.status || (isBooked ? 'cottage-booked' : 'cottage-available'), // Use backend status
+          status: dateData.status || defaultStatusForCategory, // Use backend status or category-appropriate default
           isBooked: isBooked,
           availableItems: dateData.availableItems || 
-            (category === 'function-halls' ? dateData.availableHalls : dateData.availableCottages) || [],
+            (isFunctionHall ? dateData.availableHalls : dateData.availableCottages) || [],
           bookedItems: dateData.bookedItems ||
-            (category === 'function-halls' ? dateData.bookedHalls : dateData.bookedCottages) || [],
+            (isFunctionHall ? dateData.bookedHalls : dateData.bookedCottages) || [],
           // Keep legacy field names for backward compatibility
-          availableCottages: dateData.availableCottages || (category === 'cottages' ? (dateData.availableItems || []) : []),
-          bookedCottages: dateData.bookedCottages || (category === 'cottages' ? (dateData.bookedItems || []) : []),
+          availableCottages: dateData.availableCottages || (!isFunctionHall ? (dateData.availableItems || []) : []),
+          bookedCottages: dateData.bookedCottages || (!isFunctionHall ? (dateData.bookedItems || []) : []),
+          // Add function hall specific fields
+          availableHalls: isFunctionHall ? (dateData.availableHalls || []) : [],
+          bookedHalls: isFunctionHall ? (dateData.bookedHalls || []) : [],
           availableCount: dateData.availableCount,
           bookedCount: dateData.bookedCount
         };
@@ -207,9 +216,17 @@ async function getDateStatus(date, packageId) {
     
     // Default to available if no data returned
     console.log(`[Calendar] No data for ${dateString}, defaulting to available (category: ${calendarState.packageCategory})`);
-    const defaultStatus = calendarState.packageCategory === 'rooms' ? 
-      { status: 'available-all', availableCount: 4, bookedCount: 0 } :
-      { status: 'cottage-available', isBooked: false };
+    const category = calendarState.packageCategory;
+    let defaultStatus;
+    if (category === 'rooms') {
+      defaultStatus = { status: 'available-all', availableCount: 4, bookedCount: 0 };
+    } else if (category === 'cottages') {
+      defaultStatus = { status: 'cottage-available', isBooked: false, availableCount: 3, bookedCount: 0 };
+    } else if (category === 'function-halls') {
+      defaultStatus = { status: 'function-hall-available', isBooked: false, availableCount: 2, bookedCount: 0 };
+    } else {
+      defaultStatus = { status: 'available-all', availableCount: 4, bookedCount: 0 };
+    }
     
     availabilityCache.set(cacheKey, defaultStatus);
     return defaultStatus;
@@ -416,7 +433,7 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
           defaultStatus = { status: 'cottage-available', isBooked: false, availableCount: 3, bookedCount: 0 };
         } else {
           // Function halls
-          defaultStatus = { status: 'cottage-available', isBooked: false, availableCount: 2, bookedCount: 0 };
+          defaultStatus = { status: 'function-hall-available', isBooked: false, availableCount: 2, bookedCount: 0 };
         }
       }
       statuses.push(defaultStatus);
@@ -595,29 +612,45 @@ async function generateCalendarHTML(year, month, packageTitle, packageId) {
       tooltipText = `title="Booked rooms: ${bookedRoomsList}"`;
     } else if (calendarState.packageCategory === 'rooms' && availableCount !== undefined && !isPast) {
       tooltipText = `title="${availableCount} of 4 rooms available"`;
-    } else if (statusType && statusType.includes('cottage-booked')) {
-      const categoryLabel = calendarState.packageCategory === 'function-halls' ? 'Function hall' : 'Cottage';
+    } else if (statusType && (statusType.includes('cottage-booked') || statusType.includes('function-hall-booked'))) {
+      const isFunctionHall = statusType.includes('function-hall');
+      const categoryLabel = isFunctionHall ? 'Function hall' : 'Cottage';
       const statusData = typeof statuses[i] === 'object' ? statuses[i] : null;
       
-      if (statusData && statusData.bookedCottages && Array.isArray(statusData.bookedCottages) && statusData.bookedCottages.length > 0) {
+      // Handle function hall booked data
+      if (isFunctionHall && statusData && statusData.bookedHalls && Array.isArray(statusData.bookedHalls) && statusData.bookedHalls.length > 0) {
+        const bookedList = statusData.bookedHalls.join(', ');
+        const availableCount = statusData.availableCount || 0;
+        const totalCount = 2;
+        tooltipText = `title="Booked: ${bookedList} | ${availableCount} of ${totalCount} halls available"`;
+      } else if (!isFunctionHall && statusData && statusData.bookedCottages && Array.isArray(statusData.bookedCottages) && statusData.bookedCottages.length > 0) {
         const bookedList = statusData.bookedCottages.join(', ');
         const availableCount = statusData.availableCount || 0;
-        const totalCount = calendarState.packageCategory === 'cottages' ? 3 : 2;
-        tooltipText = `title="Booked: ${bookedList} | ${availableCount} of ${totalCount} available"`;
+        const totalCount = 3;
+        tooltipText = `title="Booked: ${bookedList} | ${availableCount} of ${totalCount} cottages available"`;
       } else {
         tooltipText = `title="${categoryLabel} booked on this date"`;
       }
-    } else if (statusType && statusType.includes('cottage')) {
-      const categoryLabel = calendarState.packageCategory === 'function-halls' ? 'Function hall' : 'Cottage';
+    } else if (statusType && (statusType.includes('cottage') || statusType.includes('function-hall'))) {
+      const isFunctionHall = statusType.includes('function-hall');
+      const categoryLabel = isFunctionHall ? 'Function hall' : 'Cottage';
       const statusData = typeof statuses[i] === 'object' ? statuses[i] : null;
+      
       if (statusData && statusData.availableCount !== undefined) {
-        const totalCount = calendarState.packageCategory === 'cottages' ? 3 : 2;
-        const categoryPlural = categoryLabel.toLowerCase() + (categoryLabel.toLowerCase() === 'function hall' ? 's' : 's');
+        const totalCount = isFunctionHall ? 2 : 3;
+        const categoryPlural = isFunctionHall ? 'halls' : 'cottages';
         tooltipText = `title="${statusData.availableCount} of ${totalCount} ${categoryPlural} available"`;
-      } else if (statusData && statusData.availableItems && Array.isArray(statusData.availableItems)) {
-        const availableCount = statusData.availableItems.length;
-        const totalCount = calendarState.packageCategory === 'cottages' ? 3 : 2;
-        tooltipText = `title="${availableCount} of ${totalCount} ${categoryLabel.toLowerCase()}s available"`;
+      } else if (statusData) {
+        // Handle availableHalls for function halls or availableCottages for cottages
+        const availableItems = isFunctionHall ? (statusData.availableHalls || []) : (statusData.availableCottages || statusData.availableItems || []);
+        if (Array.isArray(availableItems) && availableItems.length > 0) {
+          const availableCount = availableItems.length;
+          const totalCount = isFunctionHall ? 2 : 3;
+          const categoryPlural = isFunctionHall ? 'halls' : 'cottages';
+          tooltipText = `title="${availableCount} of ${totalCount} ${categoryPlural} available"`;
+        } else {
+          tooltipText = `title="${categoryLabel} available on this date"`;
+        }
       } else {
         tooltipText = `title="${categoryLabel} available on this date"`;
       }
@@ -1001,15 +1034,49 @@ async function confirmDateSelection() {
         const newDate = calendarState.selectedCheckin;
         
         try {
-          const availabilityResult = await checkAvailability(1, newDate, newDate, 'cottages', calendarState.editBookingId);
+          // Get package ID from booking being edited, or from booking data, or default to 1
+          let packageId = window.bookingFormState?.packageId;
+          if (!packageId && calendarState.editBookingId) {
+            // Try to get from booking data if available
+            const booking = window.allBookings?.find(b => String(b.id) === String(calendarState.editBookingId));
+            packageId = booking?.package_id;
+            if (packageId) {
+              console.log('[confirmDateSelection] Retrieved packageId from booking data:', packageId);
+            }
+          }
+          packageId = packageId || 1;  // Last resort default
+          
+          console.log('[confirmDateSelection] Checking cottage availability:', {
+            newDate,
+            editingCottages,
+            packageId,
+            editBookingId: calendarState.editBookingId,
+            editBookingIdType: typeof calendarState.editBookingId,
+            packageIdSource: window.bookingFormState?.packageId ? 'bookingFormState' : (calendarState.editBookingId ? 'bookingData' : 'default')
+          });
+          
+          const availabilityResult = await checkAvailability(packageId, newDate, newDate, 'cottages', calendarState.editBookingId);
           const dayData = availabilityResult?.dateAvailability?.[newDate];
           const availableCottages = dayData?.availableCottages || [];
           
-          console.log('[confirmDateSelection] Available cottages on', newDate, ':', availableCottages);
+          console.log('[confirmDateSelection] Availability result:', {
+            newDate,
+            availableCottages,
+            editingCottages,
+            editBookingId: calendarState.editBookingId,
+            hasDayData: !!dayData
+          });
           
           const unavailableCottages = editingCottages.filter(cottage => !availableCottages.includes(cottage));
           
           if (unavailableCottages.length > 0) {
+            console.error('[confirmDateSelection] Cottage conflict detected:', {
+              unavailableCottages,
+              availableCottages,
+              editingCottages,
+              editBookingId: calendarState.editBookingId,
+              date: newDate
+            });
             alert(`Cannot change to ${newDate}:\n\nThe following cottages are already booked:\n${unavailableCottages.join(', ')}\n\nPlease select a different date or remove these cottages from your booking.`);
             return;
           }
@@ -1725,15 +1792,15 @@ export function openCalendarModal(packageTitle, reservationCount, packageCategor
           </div>
           ` : packageCategory === 'function-halls' ? `
           <div class="legend-item">
-            <div class="legend-color cottage-available"></div>
+            <div class="legend-color function-hall-available"></div>
             <span>Available</span>
           </div>
           <div class="legend-item">
-            <div class="legend-color cottage-partial"></div>
+            <div class="legend-color function-hall-partial"></div>
             <span>Partially Booked</span>
           </div>
           <div class="legend-item">
-            <div class="legend-color cottage-booked"></div>
+            <div class="legend-color function-hall-booked-all"></div>
             <span>Fully Booked</span>
           </div>
           ` : ''}

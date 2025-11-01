@@ -1,6 +1,8 @@
 // Booking Flow State Management
 // Manages dates, selected rooms, guest counts, and cottage selections
 
+import { normalizeDateInputToYMD } from './calendarUtils.js';
+
 export const bookingState = {
   dates: { checkin: null, checkout: null },
   selectedRooms: [],
@@ -189,7 +191,16 @@ export const bookingState = {
   async getAvailableCottages(checkin, checkout) {
     if (!checkin || !checkout) return [];
     
-    console.log(`[BookingState] Getting available cottages for ${checkin} to ${checkout}`);
+    // Normalize dates to ensure consistent format
+    const normalizedCheckin = normalizeDateInputToYMD(checkin);
+    const normalizedCheckout = normalizeDateInputToYMD(checkout);
+    
+    if (!normalizedCheckin || !normalizedCheckout) {
+      console.error('[BookingState] Failed to normalize dates:', { checkin, checkout });
+      return [];
+    }
+    
+    console.log(`[BookingState] Getting available cottages for ${checkin} to ${checkout} (normalized: ${normalizedCheckin} to ${normalizedCheckout})`);
     
     try {
       // Call backend API to get real-time availability
@@ -201,8 +212,8 @@ export const bookingState = {
         console.log(`[BookingState] Excluding booking ${excludeBookingId} from cottage availability check (re-edit mode)`);
       }
       
-      // Pass 'cottages' category to only get cottage bookings
-      const result = await checkAvailability(1, checkin, checkout, 'cottages', excludeBookingId);
+      // Pass 'cottages' category to only get cottage bookings with normalized dates
+      const result = await checkAvailability(1, normalizedCheckin, normalizedCheckout, 'cottages', excludeBookingId);
       
       console.log('[BookingState] Cottage availability result:', result);
       
@@ -266,12 +277,22 @@ export const bookingState = {
         console.log(`[BookingState] 🏛️ Day data for ${visitDate}:`, day);
         
         if (Array.isArray(day?.availableHalls)) {
-          console.log(`[BookingState] ✅ Found availableHalls in dateAvailability[${visitDate}]:`, day.availableHalls);
-          return day.availableHalls;
+          // Deduplicate to prevent any duplicate entries
+          const uniqueHalls = [...new Set(day.availableHalls)];
+          console.log(`[BookingState] ✅ Found availableHalls in dateAvailability[${visitDate}]:`, uniqueHalls);
+          if (uniqueHalls.length !== day.availableHalls.length) {
+            console.warn(`[BookingState] ⚠️ Deduplicated availableHalls: ${day.availableHalls.length} -> ${uniqueHalls.length}`);
+          }
+          return uniqueHalls;
         }
         if (Array.isArray(day?.availableItems)) {
-          console.log(`[BookingState] ✅ Found availableItems in dateAvailability[${visitDate}]:`, day.availableItems);
-          return day.availableItems;
+          // Deduplicate to prevent any duplicate entries
+          const uniqueItems = [...new Set(day.availableItems)];
+          console.log(`[BookingState] ✅ Found availableItems in dateAvailability[${visitDate}]:`, uniqueItems);
+          if (uniqueItems.length !== day.availableItems.length) {
+            console.warn(`[BookingState] ⚠️ Deduplicated availableItems: ${day.availableItems.length} -> ${uniqueItems.length}`);
+          }
+          return uniqueItems;
         }
       } else {
         console.warn(`[BookingState] ⚠️ No dateAvailability entry for ${visitDate}. Available keys:`, result?.dateAvailability ? Object.keys(result.dateAvailability) : 'none');
@@ -279,12 +300,22 @@ export const bookingState = {
       
       // Secondary: Check root-level fields (for compatibility with different API formats)
       if (Array.isArray(result?.availableHalls)) {
-        console.log('[BookingState] ✅ Found availableHalls at root:', result.availableHalls);
-        return result.availableHalls;
+        // Deduplicate to prevent any duplicate entries
+        const uniqueHalls = [...new Set(result.availableHalls)];
+        console.log('[BookingState] ✅ Found availableHalls at root:', uniqueHalls);
+        if (uniqueHalls.length !== result.availableHalls.length) {
+          console.warn(`[BookingState] ⚠️ Deduplicated root availableHalls: ${result.availableHalls.length} -> ${uniqueHalls.length}`);
+        }
+        return uniqueHalls;
       }
       if (Array.isArray(result?.availableItems)) {
-        console.log('[BookingState] ✅ Found availableItems at root:', result.availableItems);
-        return result.availableItems;
+        // Deduplicate to prevent any duplicate entries
+        const uniqueItems = [...new Set(result.availableItems)];
+        console.log('[BookingState] ✅ Found availableItems at root:', uniqueItems);
+        if (uniqueItems.length !== result.availableItems.length) {
+          console.warn(`[BookingState] ⚠️ Deduplicated root availableItems: ${result.availableItems.length} -> ${uniqueItems.length}`);
+        }
+        return uniqueItems;
       }
       
       // Fallback: both halls available

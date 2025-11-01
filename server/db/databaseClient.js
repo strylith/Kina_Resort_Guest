@@ -5,7 +5,8 @@ import mockClient from './mockDatabaseClient.js';
 import { supabaseWrapper, getSupabaseService, getSupabaseAnonService } from './supabaseClient.js';
 
 // Determine which client to use
-const useMock = process.env.USE_MOCK_DB === 'true' || process.env.NODE_ENV === 'test';
+// Only use mock if explicitly enabled
+const useMock = process.env.USE_MOCK_DB === 'true';
 
 let realSupabase = null;
 let realSupabaseAnon = null;

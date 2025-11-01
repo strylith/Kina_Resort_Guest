@@ -121,6 +121,15 @@ async function router(){
         initLuxuryPackages();
       }, 100); // Small delay to ensure DOM is ready
     }
+    
+    // Initialize calendar page for weather page
+    if (path === '/weather') {
+      setTimeout(() => {
+        if (window.initCalendarPage) {
+          window.initCalendarPage();
+        }
+      }, 100); // Small delay to ensure DOM is ready
+    }
   }catch(err){
     console.error(err);
     showToast('Something went wrong loading this page.', 'error');

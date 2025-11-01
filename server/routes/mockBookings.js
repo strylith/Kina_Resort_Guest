@@ -905,7 +905,11 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
         if (item.usage_date) {
           const usageDateStr = normalizeDateString(item.usage_date);
           if (usageDateStr === dateString) {
-            bookedIds.push(String(item.item_id).trim());
+            const itemIdStr = String(item.item_id).trim();
+            // Prevent duplicates - same cottage can't be booked twice on same date
+            if (!bookedIds.includes(itemIdStr)) {
+              bookedIds.push(itemIdStr);
+            }
           }
           return;
         }
@@ -927,8 +931,13 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
           : (dateString >= bookingCheckIn && dateString < bookingCheckOut);
         
         if (isDateBooked) {
-          if (!bookedIds.includes(item.item_id)) {
-            bookedIds.push(item.item_id);
+          // Normalize item_id to string for consistent comparison
+          const itemIdStr = String(item.item_id).trim();
+          // Prevent duplicates - same item can't be booked twice on same date
+          if (!bookedIds.includes(itemIdStr)) {
+            bookedIds.push(itemIdStr);
+          } else {
+            console.log(`[MockAvailability] ⚠️ Duplicate ${itemType} ${itemIdStr} on ${dateString} - skipping`);
           }
           
           // Enhanced logging for single-day bookings
@@ -949,7 +958,9 @@ router.get('/bookings/availability/:packageId', async (req, res) => {
       });
       
       // Calculate availability per day: only remove items booked on THIS date
-      const availableItems = allItems.filter(id => !bookedIds.includes(id));
+      // Normalize bookedIds for consistent string comparison
+      const bookedIdsNormalized = bookedIds.map(id => String(id).trim());
+      const availableItems = allItems.filter(id => !bookedIdsNormalized.includes(String(id).trim()));
 
       // Per-day diagnostics: log booked and available arrays
       if (itemType === 'room') {

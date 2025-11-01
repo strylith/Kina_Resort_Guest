@@ -20,6 +20,9 @@ export function getSupabaseService() {
         auth: {
           autoRefreshToken: false,
           persistSession: false
+        },
+        db: {
+          schema: 'kina'
         }
       }
     );
@@ -40,6 +43,9 @@ export function getSupabaseAnonService() {
         auth: {
           autoRefreshToken: false,
           persistSession: false
+        },
+        db: {
+          schema: 'kina'
         }
       }
     );

@@ -6,6 +6,7 @@ export default {
   setupFilesAfterEnv: ['<rootDir>/__tests__/setup.js'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1'
-  }
+  },
+  testTimeout: 30000
 };
 

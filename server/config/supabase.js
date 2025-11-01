@@ -52,7 +52,7 @@ export async function initializeDatabase() {
         persistSession: false
       },
       db: {
-        schema: 'public'
+        schema: 'kina'
       }
     }
   );
@@ -89,6 +89,9 @@ export function getSupabase() {
         auth: {
           autoRefreshToken: false,
           persistSession: false
+        },
+        db: {
+          schema: 'kina'
         }
       }
     );
@@ -108,6 +111,9 @@ export function getSupabaseAnon() {
         auth: {
           autoRefreshToken: false,
           persistSession: false
+        },
+        db: {
+          schema: 'kina'
         }
       }
     );

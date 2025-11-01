@@ -5,13 +5,47 @@ import { buildFunctionHallMetadata } from '../utils/functionHallMetadata.js';
 
 const router = express.Router();
 
+/**
+ * Format a date to YYYY-MM-DD string using local date components
+ * This avoids timezone shifts that occur with toISOString()
+ * @param {Date|string} dateInput - Date object or date string
+ * @returns {string} YYYY-MM-DD format string
+ */
+function formatDateToYMD(dateInput) {
+  if (!dateInput) return null;
+  
+  let date;
+  if (typeof dateInput === 'string') {
+    // Handle date strings (with or without time component)
+    date = dateInput.includes('T') ? new Date(dateInput) : new Date(dateInput + 'T00:00:00');
+  } else {
+    date = new Date(dateInput);
+  }
+  
+  // Ensure we're working with local midnight
+  date.setHours(0, 0, 0, 0);
+  
+  // Extract local date components (not UTC)
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+}
+
 // GET /api/bookings/availability/:packageId - Check availability for date range (no auth required)
 router.get('/availability/:packageId', async (req, res) => {
   try {
     const { packageId } = req.params;
-    const { checkIn, checkOut, category } = req.query;
+    const { checkIn, checkOut, category, excludeBookingId } = req.query;
 
     console.log(`[Availability] Request received for package ${packageId} from ${checkIn} to ${checkOut}, category: ${category || 'all'}`);
+    console.log(`[Availability] 📅 Calendar Page Request: ${req.get('referer') || 'Unknown source'}`);
+    if (excludeBookingId) {
+      console.log(`[Availability] 🔄 Excluding booking ${excludeBookingId} (type: ${typeof excludeBookingId}) from availability check (re-edit mode)`);
+    } else {
+      console.log(`[Availability] ℹ️ No excludeBookingId provided (normal booking mode)`);
+    }
 
     if (!checkIn || !checkOut) {
       return res.status(400).json({
@@ -29,7 +63,7 @@ router.get('/availability/:packageId', async (req, res) => {
     
     // Query booking_items with joined booking data
     // This is the single source of truth for all booked items
-    const { data: bookedItems, error } = await db
+    let query = db
       .from('booking_items')
       .select(`
         id,
@@ -47,17 +81,38 @@ router.get('/availability/:packageId', async (req, res) => {
           status
         )
       `)
-      .eq('item_type', itemType)
-      .eq('bookings.package_id', packageId);
+      .eq('item_type', itemType);
+    
+    // Only filter by package_id for rooms (multi-day bookings)
+    // Cottages/halls are shared resources - check all packages
+    if (itemType === 'room') {
+      query = query.eq('bookings.package_id', packageId);
+      console.log(`[Availability] 🔍 Filtering rooms by package_id=${packageId}`);
+    } else {
+      console.log(`[Availability] 🔍 Checking all packages for ${itemType} (shared resource)`);
+    }
+    
+    const { data: bookedItems, error } = await query;
     
     console.log(`[Availability] 🔍 Query returned ${bookedItems?.length || 0} booking_items`);
+    console.log(`[Availability] 🔍 Query details:`, {
+      itemType,
+      category,
+      packageId,
+      packageFilterApplied: itemType === 'room',
+      dateRange: `${checkIn} to ${checkOut}`,
+      excludeBookingId: excludeBookingId || 'none'
+    });
     if (bookedItems && bookedItems.length > 0) {
       console.log(`[Availability] 🔍 Sample booking_items:`, JSON.stringify(bookedItems.slice(0, 3), null, 2));
+      console.log(`[Availability] 🔍 All booking IDs in query results:`, bookedItems.map(i => i.bookings?.id).filter(Boolean));
       const itemsWithUsageDate = bookedItems.filter(item => item.usage_date);
-      console.log(`[Availability] 🔍 Items with usage_date: ${itemsWithUsageDate.length}`);
+      console.log(`[Availability] 🔍 Items with usage_date: ${itemsWithUsageDate.length}/${bookedItems.length}`);
       if (itemsWithUsageDate.length > 0) {
-        console.log(`[Availability] 🔍 Sample items with usage_date:`, itemsWithUsageDate.slice(0, 3).map(i => ({ item_id: i.item_id, usage_date: i.usage_date })));
+        console.log(`[Availability] 🔍 Sample items with usage_date:`, itemsWithUsageDate.slice(0, 3).map(i => ({ item_id: i.item_id, usage_date: i.usage_date, booking_id: i.bookings?.id })));
       }
+    } else {
+      console.log(`[Availability] ℹ️ No booking_items found for item_type='${itemType}'${itemType === 'room' ? ` and package_id=${packageId}` : ' (all packages)'}`);
     }
     
     // Filter in JavaScript after fetching (Supabase doesn't support complex OR on nested tables)
@@ -73,6 +128,17 @@ router.get('/availability/:packageId', async (req, res) => {
     const filteredItems = bookedItems?.filter(item => {
       const booking = item.bookings;
       if (!booking) return false;
+      
+      // Exclude booking being re-edited (normalize types for comparison)
+      if (excludeBookingId) {
+        // Convert both to strings for reliable comparison (booking.id is integer, excludeBookingId from query is string)
+        const bookingIdStr = String(booking.id);
+        const excludeIdStr = String(excludeBookingId);
+        if (bookingIdStr === excludeIdStr) {
+          console.log(`[Availability] 🔄 Excluding booking ${bookingIdStr} from availability check (re-edit mode)`);
+          return false;
+        }
+      }
       
       // Check status
       if (!['pending', 'confirmed'].includes(booking.status)) {
@@ -112,6 +178,31 @@ router.get('/availability/:packageId', async (req, res) => {
       })));
     }
     
+    // Log exclusion statistics if in re-edit mode (before modifying array)
+    if (excludeBookingId) {
+      const originalCount = bookedItems?.length || 0;
+      const filteredCount = filteredItems?.length || 0;
+      const excludedCount = originalCount - filteredCount;
+      console.log(`[Availability] 🔄 Exclusion check for booking ${excludeBookingId}:`);
+      console.log(`[Availability] 🔄   Original items: ${originalCount}`);
+      console.log(`[Availability] 🔄   After filtering: ${filteredCount}`);
+      console.log(`[Availability] 🔄   Excluded: ${excludedCount}`);
+      if (excludedCount > 0) {
+        const excludedItems = bookedItems?.filter(item => {
+          const bookingIdStr = String(item.bookings?.id);
+          const excludeIdStr = String(excludeBookingId);
+          return bookingIdStr === excludeIdStr;
+        }) || [];
+        console.log(`[Availability] 🔄 Excluded items:`, excludedItems.map(i => ({
+          booking_id: i.bookings?.id,
+          item_id: i.item_id,
+          usage_date: i.usage_date,
+          check_in: i.bookings?.check_in,
+          check_out: i.bookings?.check_out
+        })));
+      }
+    }
+
     // Use filtered items
     bookedItems.splice(0, bookedItems.length, ...filteredItems);
 
@@ -134,9 +225,13 @@ router.get('/availability/:packageId', async (req, res) => {
           .from('packages')
           .select('title')
           .eq('category', 'function-halls');
-        allItems = Array.isArray(halls) && halls.length > 0 ? halls.map(h => h.title) : ['Grand Function Hall', 'Intimate Function Hall'];
+        // Ensure unique items by deduplicating array
+        const hallTitles = Array.isArray(halls) && halls.length > 0 ? halls.map(h => h.title) : ['Grand Function Hall', 'Intimate Function Hall'];
+        allItems = [...new Set(hallTitles)]; // Remove duplicates
+        console.log(`[Availability] 🏛️ Function halls loaded: ${allItems.length} unique halls from ${hallTitles.length} total`);
       } catch (_) {
         allItems = ['Grand Function Hall', 'Intimate Function Hall'];
+        console.log('[Availability] 🏛️ Using fallback function halls:', allItems);
       }
     } else {
       allItems = [];
@@ -153,9 +248,12 @@ router.get('/availability/:packageId', async (req, res) => {
     // Iterate through each day in the range
     // For single-day requests, use <= to include the single day
     // For multi-day requests, use < for exclusive checkout semantics
+    console.log(`[Availability] 📅 Date loop: ${checkIn} to ${checkOut}, isSingleDay: ${isSingleDayRequest}`);
     let currentDate = new Date(checkInDate);
+    let datesProcessed = 0;
     while (isSingleDayRequest ? (currentDate.getTime() <= checkOutDate.getTime()) : (currentDate < checkOutDate)) {
-      const dateString = currentDate.toISOString().split('T')[0];
+      const dateString = formatDateToYMD(currentDate);
+      datesProcessed++;
       const bookedIds = [];
 
       // Check each booked item for conflicts on this date
@@ -164,44 +262,142 @@ router.get('/availability/:packageId', async (req, res) => {
           const booking = item.bookings;
           if (!booking) return;
           
-          const bookingCheckIn = new Date(booking.check_in);
-          const bookingCheckOut = new Date(booking.check_out);
-          bookingCheckIn.setHours(0, 0, 0, 0);
-          bookingCheckOut.setHours(0, 0, 0, 0);
-
-          // For single-day bookings (cottages), use inclusive comparison
-          // For multi-day bookings (rooms), use exclusive checkout
-          const isSingleDayBooking = bookingCheckIn.getTime() === bookingCheckOut.getTime();
-          const isDateBooked = isSingleDayBooking 
-            ? (currentDate.getTime() === bookingCheckIn.getTime())
-            : (currentDate >= bookingCheckIn && currentDate < bookingCheckOut);
-
-          // Log for debugging single-day bookings
-          if (isSingleDayBooking && itemType === 'cottage') {
-            console.log(`[Availability] Date ${dateString}: isSingleDay=${isSingleDayBooking}, isBooked=${isDateBooked}, bookingCheckIn=${bookingCheckIn.toISOString()}, item=${item.item_id}`);
-          }
-
-          // Check if current date falls within booking range
-          if (isDateBooked) {
-            if (!bookedIds.includes(item.item_id)) {
-              bookedIds.push(item.item_id);
+          // Safety check: Exclude booking being re-edited (normalize types for comparison)
+          // This is a redundant check in case items slipped through the filter
+          if (excludeBookingId) {
+            const bookingIdStr = String(booking.id);
+            const excludeIdStr = String(excludeBookingId);
+            if (bookingIdStr === excludeIdStr) {
+              console.log(`[Availability] 🔄 Excluding booking ${bookingIdStr} from date loop (re-edit mode)`);
+              return; // Skip this item
             }
+          }
+          
+          // Special handling for items with usage_date (cottages/function halls)
+          // These items are only booked on their specific usage_date, not the booking range
+          if (item.usage_date) {
+            const usageDateStr = formatDateToYMD(item.usage_date);
             
-            bookedDates.push({
-              date: dateString,
-              bookingStart: booking.check_in,
-              bookingEnd: booking.check_out,
-              itemId: item.item_id,
-              guestName: item.guest_name,
-              adults: item.adults,
-              children: item.children
-            });
+            // Only check if current date matches the usage_date exactly
+            if (dateString === usageDateStr) {
+              // Normalize item_id to string for consistent comparison
+              const itemIdStr = String(item.item_id).trim();
+              // Prevent duplicates - same item can't be booked twice on same date
+              if (!bookedIds.includes(itemIdStr)) {
+                bookedIds.push(itemIdStr);
+              } else {
+                const itemLabel = itemType === 'cottage' ? 'cottage' : itemType === 'function-hall' ? 'function hall' : 'item';
+                console.log(`[Availability] ⚠️ Duplicate ${itemLabel} ${itemIdStr} on ${dateString} - skipping`);
+              }
+              
+              bookedDates.push({
+                date: dateString,
+                bookingStart: booking.check_in,
+                bookingEnd: booking.check_out,
+                itemId: item.item_id,
+                guestName: item.guest_name,
+                adults: item.adults,
+                children: item.children
+              });
+              
+              if (itemType === 'cottage') {
+                console.log(`[Availability] Cottage ${item.item_id} booked on ${dateString} (usage_date match)`);
+              } else if (itemType === 'function-hall') {
+                console.log(`[Availability] 🏛️ Function hall ${item.item_id} booked on ${dateString} (usage_date match)`);
+              }
+            }
+            return; // Skip booking range check for items with usage_date
+          }
+          
+          // For items without usage_date:
+          // - Rooms: check booking date range (multi-day bookings are possible)
+          // - Cottages/Function Halls: should have usage_date, but if missing, use check_in as fallback
+          //   (Cottages/halls are single-day rentals, so use check_in as the usage date)
+          if (itemType === 'cottage' || itemType === 'function-hall') {
+            // For cottages/halls without usage_date, treat check_in as the usage date
+            // This is a fallback for old bookings that might not have usage_date set
+            const usageDateStr = formatDateToYMD(booking.check_in);
+            
+            // Only check if current date matches check_in exactly
+            if (dateString === usageDateStr) {
+              const itemIdStr = String(item.item_id).trim();
+              // Prevent duplicates in fallback path too
+              if (!bookedIds.includes(itemIdStr)) {
+                bookedIds.push(itemIdStr);
+              } else {
+                const itemLabel = itemType === 'cottage' ? 'cottage' : 'function hall';
+                console.log(`[Availability] ⚠️ Duplicate ${itemLabel} ${itemIdStr} on ${dateString} (check_in fallback) - skipping`);
+              }
+              
+              bookedDates.push({
+                date: dateString,
+                bookingStart: booking.check_in,
+                bookingEnd: booking.check_out,
+                itemId: item.item_id,
+                guestName: item.guest_name,
+                adults: item.adults,
+                children: item.children
+              });
+              
+              if (itemType === 'cottage') {
+                console.log(`[Availability] Cottage ${item.item_id} booked on ${dateString} (check_in fallback, missing usage_date)`);
+              } else if (itemType === 'function-hall') {
+                console.log(`[Availability] 🏛️ Function hall ${item.item_id} booked on ${dateString} (check_in fallback, missing usage_date)`);
+              }
+            }
+          } else {
+            // For rooms: check booking date range (multi-day bookings are possible)
+            const bookingCheckIn = new Date(booking.check_in);
+            const bookingCheckOut = new Date(booking.check_out);
+            bookingCheckIn.setHours(0, 0, 0, 0);
+            bookingCheckOut.setHours(0, 0, 0, 0);
+
+            // For single-day bookings, use inclusive comparison
+            // For multi-day bookings, use exclusive checkout
+            const isSingleDayBooking = bookingCheckIn.getTime() === bookingCheckOut.getTime();
+            const isDateBooked = isSingleDayBooking 
+              ? (currentDate.getTime() === bookingCheckIn.getTime())
+              : (currentDate >= bookingCheckIn && currentDate < bookingCheckOut);
+
+            // Check if current date falls within booking range
+            if (isDateBooked) {
+              if (!bookedIds.includes(item.item_id)) {
+                bookedIds.push(item.item_id);
+              }
+              
+              bookedDates.push({
+                date: dateString,
+                bookingStart: booking.check_in,
+                bookingEnd: booking.check_out,
+                itemId: item.item_id,
+                guestName: item.guest_name,
+                adults: item.adults,
+                children: item.children
+              });
+            }
           }
         });
       }
 
       // Determine available items
-      const availableItems = allItems.filter(id => !bookedIds.includes(id));
+      // Normalize bookedIds for consistent string comparison
+      const bookedIdsNormalized = bookedIds.map(id => String(id).trim());
+      const availableItems = allItems.filter(id => !bookedIdsNormalized.includes(String(id).trim()));
+      
+      // Enhanced logging for cottage and function hall availability
+      if (itemType === 'cottage') {
+        console.log(`[Availability] 🏠 Date ${dateString} - Cottage Calculation:`);
+        console.log(`[Availability] 🏠   All cottages: [${allItems.join(', ')}] (${allItems.length} total)`);
+        console.log(`[Availability] 🏠   Booked cottages: [${bookedIds.join(', ')}] (${bookedIds.length} booked)`);
+        console.log(`[Availability] 🏠   Available cottages: [${availableItems.join(', ')}] (${availableItems.length} available)`);
+        console.log(`[Availability] 🏠   Booked IDs normalized: [${bookedIdsNormalized.join(', ')}]`);
+      } else if (itemType === 'function-hall') {
+        console.log(`[Availability] 🏛️ Date ${dateString} - Function Hall Calculation:`);
+        console.log(`[Availability] 🏛️   All halls: [${allItems.join(', ')}] (${allItems.length} total)`);
+        console.log(`[Availability] 🏛️   Booked halls: [${bookedIds.join(', ')}] (${bookedIds.length} booked)`);
+        console.log(`[Availability] 🏛️   Available halls: [${availableItems.join(', ')}] (${availableItems.length} available)`);
+        console.log(`[Availability] 🏛️   Booked IDs normalized: [${bookedIdsNormalized.join(', ')}]`);
+      }
       
       let status;
       if (itemType === 'room') {
@@ -220,6 +416,7 @@ router.get('/availability/:packageId', async (req, res) => {
         } else {
           status = 'cottage-booked-partial';
         }
+        console.log(`[Availability] ${dateString}: status=${status}, bookedCount=${bookedIds.length}, availableCount=${availableItems.length}, totalItems=${allItems.length}`);
       } else if (itemType === 'function-hall') {
         if (bookedIds.length === 0) {
           status = 'function-hall-available';
@@ -264,11 +461,28 @@ router.get('/availability/:packageId', async (req, res) => {
           availableCount: availableItems.length,
           isBooked: bookedIds.length > 0
         };
+        
+        // Enhanced logging for function hall bookings
+        if (bookedIds.length > 0) {
+          console.log(`[Availability] 🏛️ ${dateString}: bookedCount=${bookedIds.length}, isBooked=true, bookedHalls=${JSON.stringify(bookedIds)}, availableHalls=${JSON.stringify(availableItems)}`);
+        }
+      }
+
+      // Log if date entry was created
+      if (dateAvailability[dateString]) {
+        if (itemType === 'cottage' && datesProcessed <= 3) {
+          // Only log first 3 dates for cottage to reduce noise
+          console.log(`[Availability] ✅ Date entry created for ${dateString}`);
+        }
+      } else {
+        console.warn(`[Availability] ⚠️ No date entry created for ${dateString}`);
       }
 
       // Move to next day
       currentDate.setDate(currentDate.getDate() + 1);
     }
+    
+    console.log(`[Availability] 📅 Processed ${datesProcessed} dates, created ${Object.keys(dateAvailability).length} entries`);
 
     // Calculate overall availability
     const totalDates = Object.keys(dateAvailability).length;
@@ -297,9 +511,24 @@ router.get('/availability/:packageId', async (req, res) => {
     };
     
     console.log(`[Availability] 📤 Sending response with ${Object.keys(dateAvailability).length} dates`);
+    console.log(`[Availability] 📤 Summary - Available: ${overallAvailable}, Avg Items: ${avgItemAvailability}, Booked Dates: ${bookedDatesCount}/${totalDates}`);
     if (itemType === 'cottage') {
       const datesWithBookings = Object.entries(dateAvailability).filter(([, data]) => data.isBooked);
-      console.log(`[Availability] 📤 Cottage booked dates: ${datesWithBookings.length}`, datesWithBookings.map(([date, data]) => `${date}: ${data.bookedCottages?.join(', ')}`));
+      const allDatesData = Object.entries(dateAvailability);
+      console.log(`[Availability] 📤 Cottage response details:`);
+      console.log(`[Availability] 📤   Total dates in response: ${allDatesData.length}`);
+      console.log(`[Availability] 📤   Dates with bookings: ${datesWithBookings.length}`);
+      console.log(`[Availability] 📤   Booked dates:`, datesWithBookings.map(([date, data]) => `${date}: ${data.bookedCottages?.join(', ')}`));
+      console.log(`[Availability] 📤   Sample date data (first 3):`, allDatesData.slice(0, 3).map(([date, data]) => ({
+        date,
+        availableCottages: data.availableCottages,
+        bookedCottages: data.bookedCottages,
+        isBooked: data.isBooked
+      })));
+    }
+    if (itemType === 'function-hall') {
+      const datesWithBookings = Object.entries(dateAvailability).filter(([, data]) => data.isBooked);
+      console.log(`[Availability] 📤 Function hall booked dates: ${datesWithBookings.length}`, datesWithBookings.map(([date, data]) => `${date}: ${data.bookedHalls?.join(', ')}`));
     }
     
     res.json(response);
@@ -396,6 +625,7 @@ router.post('/', async (req, res) => {
       packageId, 
       checkIn, 
       checkOut, 
+      bookingId, // bookingId for edit mode
       guests,
       totalCost,
       paymentMode,
@@ -491,50 +721,6 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Validate room capacity if per-room guests provided
-    const ROOM_CAPACITY = 4; // Maximum guests per room
-    if (Array.isArray(perRoomGuests) && perRoomGuests.length > 0) {
-      for (const roomGuest of perRoomGuests) {
-        const roomAdults = roomGuest.adults || 0;
-        const roomChildren = roomGuest.children || 0;
-        const roomTotal = roomAdults + roomChildren;
-        
-        if (roomTotal > ROOM_CAPACITY) {
-          console.warn('[Booking] Validation failed:', {
-            field: 'perRoomGuests',
-            roomId: roomGuest.roomId || 'unknown',
-            adults: roomAdults,
-            children: roomChildren,
-            total: roomTotal,
-            capacity: ROOM_CAPACITY,
-            error: `Room capacity exceeded: ${roomTotal} guests exceeds maximum of ${ROOM_CAPACITY}`,
-            userId: userId,
-            timestamp: new Date().toISOString()
-          });
-          return res.status(400).json({
-            success: false,
-            error: `Room ${roomGuest.roomId || 'unknown'} exceeds capacity: ${roomTotal} guests (maximum ${ROOM_CAPACITY} allowed)`
-          });
-        }
-      }
-    } else if (totalGuests > ROOM_CAPACITY) {
-      // Validate main guests object for single room bookings
-      console.warn('[Booking] Validation failed:', {
-        field: 'guests',
-        adults: guests.adults || 0,
-        children: guests.children || 0,
-        total: totalGuests,
-        capacity: ROOM_CAPACITY,
-        error: `Guest count exceeds room capacity: ${totalGuests} guests exceeds maximum of ${ROOM_CAPACITY}`,
-        userId: userId,
-        timestamp: new Date().toISOString()
-      });
-      return res.status(400).json({
-        success: false,
-        error: `Guest count exceeds room capacity: ${totalGuests} guests (maximum ${ROOM_CAPACITY} allowed per room)`
-      });
-    }
-    
     console.log('[Booking] Received valid booking data:', { 
       packageId, 
       checkIn, 
@@ -555,39 +741,73 @@ router.post('/', async (req, res) => {
     // Server-side conflict check for cottages on the selected date
     if (Array.isArray(selectedCottages) && selectedCottages.length > 0) {
       try {
-        const usageDate = new Date(checkIn);
-        usageDate.setHours(0,0,0,0);
-        const usageDateStr = usageDate.toISOString().split('T')[0];
+        const usageDateStr = formatDateToYMD(checkIn);
+        console.log('[Booking] 🏠 Cottage conflict check - Selected cottages:', selectedCottages, 'Date:', checkIn, '-> normalized:', usageDateStr);
 
         // Fetch any booking_items of cottages for those item_ids with overlapping date
         const { data: conflictingItems, error: conflictErr } = await db
           .from('booking_items')
-          .select(`id, item_id, item_type, bookings!inner(id, check_in, check_out, status)`) 
-          .eq('item_type', 'cottage');
+          .select(`id, item_id, item_type, usage_date, bookings!inner(id, check_in, check_out, status)`) 
+          .eq('item_type', 'cottage')
+          .in('item_id', selectedCottages);  // Filter by selected cottages for efficiency
 
         if (conflictErr) {
           throw conflictErr;
         }
 
-        // Filter conflicts on the exact usage date and pending/confirmed statuses
+        console.log('[Booking] 🏠 Found', conflictingItems?.length || 0, 'potential conflicting booking items');
+
+        // Filter conflicts: cottages with matching usage_date or check_in fallback
         const conflicts = (conflictingItems || []).filter(row => {
           const b = row.bookings;
           if (!b) return false;
+          
+          // Exclude current booking if editing
+          if (bookingId && String(b.id) === String(bookingId)) {
+            console.log('[Booking] 🏠 Excluding current booking', bookingId, 'from conflict check');
+            return false;
+          }
+          
           if (!['pending','confirmed'].includes(b.status)) return false;
-          const bStart = new Date(b.check_in); bStart.setHours(0,0,0,0);
-          const bEnd = new Date(b.check_out); bEnd.setHours(0,0,0,0);
-          // Overlap if usageDate within [bStart, bEnd] inclusive
-          const overlaps = usageDate >= bStart && usageDate <= bEnd;
-          return overlaps && selectedCottages.includes(row.item_id);
+          
+          // For cottages, check usage_date first (most accurate)
+          if (row.usage_date) {
+            const rowUsageDateStr = formatDateToYMD(row.usage_date);
+            console.log('[Booking] 🏠 Comparing usage_date:', rowUsageDateStr, 'with requested:', usageDateStr);
+            // Exact match on usage_date
+            if (rowUsageDateStr === usageDateStr) {
+              console.log('[Booking] 🏠 ⚠️ CONFLICT detected: Cottage', row.item_id, 'booked on', rowUsageDateStr);
+              return selectedCottages.includes(row.item_id);
+            }
+          } else {
+            // Fallback: check booking date range (for old bookings without usage_date)
+            const bStart = new Date(b.check_in); 
+            bStart.setHours(0,0,0,0);
+            const bEnd = new Date(b.check_out); 
+            bEnd.setHours(0,0,0,0);
+            const usageDate = new Date(checkIn);
+            usageDate.setHours(0,0,0,0);
+            // Overlap if usageDate within [bStart, bEnd] inclusive
+            const overlaps = usageDate >= bStart && usageDate <= bEnd;
+            if (overlaps && selectedCottages.includes(row.item_id)) {
+              console.log('[Booking] 🏠 ⚠️ CONFLICT detected (fallback): Cottage', row.item_id, 'booked in range', b.check_in, 'to', b.check_out);
+              return true;
+            }
+          }
+          
+          return false;
         });
 
         if (conflicts.length > 0) {
+          console.log('[Booking] 🏠 ❌ Booking rejected due to conflicts:', conflicts.map(c => c.item_id));
           return res.status(409).json({
             success: false,
             error: 'Selected cottage is already booked for that date. Please choose a different cottage or date.',
             conflicts: conflicts.map(c => c.item_id)
           });
         }
+        
+        console.log('[Booking] 🏠 ✅ No conflicts found, booking allowed');
       } catch (e) {
         console.error('[Booking] Cottage conflict check failed:', e);
         return res.status(500).json({ success: false, error: 'Failed to validate cottage availability' });
@@ -624,9 +844,62 @@ router.post('/', async (req, res) => {
     
     console.log(`[Booking] Package found: ${packageData.title} (ID: ${packageData.id}), Category: ${packageData.category}`);
     
+    // Determine category from request body if available, otherwise use package category
+    // This is a defensive check in case package lookup returns wrong category
+    const requestCategory = req.body.category; // Category sent from client
+    const finalCategory = requestCategory || packageData.category;
+    console.log(`[Booking] Category determination: requestCategory=${requestCategory}, packageCategory=${packageData.category}, finalCategory=${finalCategory}`);
+    
+    // Category-specific capacity validation (must happen AFTER package lookup to know category)
+    const ROOM_CAPACITY = 4; // Maximum guests per room
+    if (finalCategory === 'rooms') {
+      // Validate room capacity if per-room guests provided
+      if (Array.isArray(perRoomGuests) && perRoomGuests.length > 0) {
+        for (const roomGuest of perRoomGuests) {
+          const roomAdults = roomGuest.adults || 0;
+          const roomChildren = roomGuest.children || 0;
+          const roomTotal = roomAdults + roomChildren;
+          
+          if (roomTotal > ROOM_CAPACITY) {
+            console.warn('[Booking] Validation failed:', {
+              field: 'perRoomGuests',
+              roomId: roomGuest.roomId || 'unknown',
+              adults: roomAdults,
+              children: roomChildren,
+              total: roomTotal,
+              capacity: ROOM_CAPACITY,
+              error: `Room capacity exceeded: ${roomTotal} guests exceeds maximum of ${ROOM_CAPACITY}`,
+              userId: userId,
+              timestamp: new Date().toISOString()
+            });
+            return res.status(400).json({
+              success: false,
+              error: `Room ${roomGuest.roomId || 'unknown'} exceeds capacity: ${roomTotal} guests (maximum ${ROOM_CAPACITY} allowed)`
+            });
+          }
+        }
+      } else if (totalGuests > ROOM_CAPACITY) {
+        // Validate main guests object for single room bookings
+        console.warn('[Booking] Validation failed:', {
+          field: 'guests',
+          adults: guests.adults || 0,
+          children: guests.children || 0,
+          total: totalGuests,
+          capacity: ROOM_CAPACITY,
+          error: `Guest count exceeds room capacity: ${totalGuests} guests exceeds maximum of ${ROOM_CAPACITY}`,
+          userId: userId,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Guest count exceeds room capacity: ${totalGuests} guests (maximum ${ROOM_CAPACITY} allowed per room)`
+        });
+      }
+    }
+    
     // Validate cottage capacity if this is a cottage booking
     const COTTAGE_CAPACITY = 8; // Maximum guests per cottage
-    if (packageData.category === 'cottages') {
+    if (finalCategory === 'cottages') {
       if (totalGuests > COTTAGE_CAPACITY) {
         console.warn('[Booking] Validation failed:', {
           field: 'guests',
@@ -648,9 +921,9 @@ router.post('/', async (req, res) => {
     
     // Validate function hall capacity if this is a function hall booking
     const FUNCTION_HALL_MAX_CAPACITY = 150; // Maximum guests per function hall
-    if (packageData.category === 'function-halls') {
-      // Function halls use guests.total instead of adults + children
-      const functionHallGuests = guests.total || totalGuests;
+    if (finalCategory === 'function-halls') {
+      // Function halls use adults + children format (totalGuests already calculated above)
+      const functionHallGuests = totalGuests;
       if (functionHallGuests > FUNCTION_HALL_MAX_CAPACITY) {
         console.warn('[Booking] Validation failed:', {
           field: 'guests',
@@ -695,8 +968,8 @@ router.post('/', async (req, res) => {
       payment_mode: paymentMode,
       contact_number: contactNumber,
       special_requests: specialRequests,
-      status: 'pending',
-      created_at: new Date().toISOString()
+      status: 'pending'
+      // created_at and updated_at are set automatically by database defaults
     };
     
     // Store function hall metadata if this is a function hall booking
@@ -713,16 +986,59 @@ router.post('/', async (req, res) => {
     console.log('[Booking] Inserting booking data:', JSON.stringify(bookingDataToInsert, null, 2));
     
     // 1. Create the main booking record
-    const { data: insertedBookings, error: bookingError } = await db
+    // Insert without select first to avoid RLS issues, then fetch separately
+    const { data: insertedData, error: insertError } = await db
       .from('bookings')
-      .insert(bookingDataToInsert);
-    
-    // Get the inserted booking (insert always returns array)
-    const booking = Array.isArray(insertedBookings) ? insertedBookings[0] : insertedBookings;
+      .insert(bookingDataToInsert)
+      .select()
+      .single();
 
-    if (bookingError) {
-      console.error('[Booking] Database error:', bookingError);
-      throw bookingError;
+    if (insertError) {
+      console.error('[Booking] Database insert error:', insertError);
+      console.error('[Booking] Error details:', {
+        message: insertError.message,
+        code: insertError.code,
+        details: insertError.details,
+        hint: insertError.hint
+      });
+      throw insertError;
+    }
+    
+    // If insert with select returned data, use it
+    let booking = insertedData;
+    
+    // If select didn't return data (RLS or other issue), fetch it separately
+    if (!booking || !booking.id) {
+      console.log('[Booking] Select after insert returned null, fetching booking separately...');
+      
+      // Fetch the most recent booking for this user with matching data
+      const { data: fetchedBookings, error: fetchError } = await db
+        .from('bookings')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('package_id', packageId)
+        .eq('check_in', checkIn)
+        .eq('check_out', checkOut)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (fetchError) {
+        console.error('[Booking] Error fetching booking after insert:', fetchError);
+        throw new Error(`Booking created but could not be retrieved: ${fetchError.message}`);
+      }
+      
+      if (!fetchedBookings || fetchedBookings.length === 0) {
+        console.error('[Booking] Booking creation failed - booking not found after insert');
+        throw new Error('Booking insert succeeded but booking could not be retrieved');
+      }
+      
+      booking = fetchedBookings[0];
+      console.log('[Booking] Successfully fetched booking after insert:', booking.id);
+    }
+    
+    if (!booking || !booking.id) {
+      console.error('[Booking] Booking creation failed - no booking ID available');
+      throw new Error('Failed to create booking - no booking ID returned');
     }
     
     console.log('[Booking] Successfully created booking:', booking.id);
@@ -802,14 +1118,15 @@ router.post('/', async (req, res) => {
         
         console.log(`[Booking] Created ${cottageItems.length} cottage items (${selectedCottages.length} cottages × ${cottageDates.length} dates)`);
       } else {
-        // Fallback: Use main booking check_in/check_out dates
+        // Fallback: Use main booking check_in as the usage_date (single-day rental)
         const cottageItems = selectedCottages.map(cottageId => ({
           booking_id: booking.id,
           item_type: 'cottage',
-          item_id: cottageId
+          item_id: cottageId,
+          usage_date: checkIn // Cottages are single-day rentals, use check_in as usage date
         }));
         
-        console.log('[Booking] Creating cottage items:', JSON.stringify(cottageItems, null, 2));
+        console.log('[Booking] Creating cottage items (fallback with usage_date):', JSON.stringify(cottageItems, null, 2));
         
         const { error: cottagesError } = await db
           .from('booking_items')
@@ -820,7 +1137,7 @@ router.post('/', async (req, res) => {
           throw cottagesError;
         }
         
-        console.log(`[Booking] Created ${cottageItems.length} cottage items`);
+        console.log(`[Booking] Created ${cottageItems.length} cottage items with usage_date=${checkIn}`);
       }
     }
 
@@ -840,7 +1157,7 @@ router.post('/', async (req, res) => {
     const endDate = new Date(checkOut);
 
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = formatDateToYMD(d);
       
       // Upsert reservation calendar entry (mock DB: check if exists, update or insert)
       try {
@@ -899,9 +1216,17 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Create booking error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
-      error: 'Failed to create booking'
+      error: 'Failed to create booking',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -1119,14 +1444,15 @@ router.patch('/:id', async (req, res) => {
           
           console.log(`[Booking] 🏠 Updated ${cottageItems.length} cottage items (${selectedCottages.length} cottages × ${cottageDates.length} dates)`);
         } else {
-          // Fallback: Create cottage items without specific dates
+          // Fallback: Create cottage items with check_in as usage_date (single-day rental)
           const cottageItems = selectedCottages.map(cottageId => ({
             booking_id: id,
             item_type: 'cottage',
-            item_id: cottageId
+            item_id: cottageId,
+            usage_date: checkIn // Cottages are single-day rentals, use check_in as usage date
           }));
           
-          console.log('[Booking] Creating cottage items without dates:', JSON.stringify(cottageItems, null, 2));
+          console.log('[Booking] Creating cottage items (fallback with usage_date):', JSON.stringify(cottageItems, null, 2));
           
           const { error: cottagesError } = await db
             .from('booking_items')
